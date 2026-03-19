@@ -2,17 +2,14 @@
   "name": "covenant-tracker",
   "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
   "dependencies": {
     "next": "14.2.3",
     "react": "^18",
     "react-dom": "^18",
     "@anthropic-ai/sdk": "^0.24.0",
     "formidable": "^3.5.1",
-    "ioredis": "^5.3.2"
+    "ioredis": "^5.3.2",
+    "pdf-parse": "^1.1.1"
   }
 }

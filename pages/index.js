@@ -298,7 +298,8 @@ function UploadModal({issuer,onClose,onSuccess}){
   const[showPicker,setShowPicker]=useState(false);
   const[fechaEEFF,setFechaEEFF]=useState("");
 
-  async function handleExtract(){if(!file)return;setLoading(true);setError("");try{const fd=new FormData();fd.append("pdf",file);fd.append("issuerName",issuer.name);fd.append("covenants",JSON.stringify(issuer.covenants));const res=await fetch("/api/extract-pdf",{method:"POST",body:fd});const data=await res.json();if(!res.ok)throw new Error(data.error);
+  const[mode,setMode]=useState("direct"); // direct | smart
+  async function handleExtract(){if(!file)return;setLoading(true);setError("");try{const fd=new FormData();fd.append("pdf",file);fd.append("issuerName",issuer.name);fd.append("covenants",JSON.stringify(issuer.covenants));if(mode==="smart")fd.append("smartMode","true");const res=await fetch("/api/extract-pdf",{method:"POST",body:fd});const data=await res.json();if(!res.ok)throw new Error(data.error);
     // Build rows: one per detected covenant, mark found/not-found
     const detectedMap={};(data.covenants||[]).forEach(c=>{detectedMap[c.name]=c;});
     // Merge: existing covenants updated with detected values, plus any NEW ones Claude found
@@ -338,11 +339,36 @@ function UploadModal({issuer,onClose,onSuccess}){
 
   return(<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}><div style={{background:"#fff",borderRadius:8,width:"100%",maxWidth:step==="confirm"?780:540,maxHeight:"90vh",overflow:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}><div style={{padding:"20px 24px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:15,fontWeight:600,color:AZ}}>{issuer.name}</div><div style={{fontSize:12,color:L.sub}}>{step==="upload"?"Subir EEFF":"Confirmar covenants detectados"}</div></div><button onClick={onClose} style={{...btn("#f0f0f0","#666"),padding:"6px 12px"}}>✕</button></div>
   <div style={{padding:24}}>
-    {step==="upload"&&(<><div style={{border:`2px dashed ${L.border}`,borderRadius:6,padding:32,textAlign:"center",marginBottom:16,background:file?"rgba(55,81,114,0.03)":"#fafafa"}}><div style={{fontSize:28,marginBottom:8}}>📄</div><p style={{color:AZ,fontWeight:500,marginBottom:8}}>{file?file.name:"Sube el PDF del EEFF"}</p><p style={{color:L.sub,fontSize:12,marginBottom:16}}>Claude buscará los ratios en notas de bonos y restricciones financieras (máx ~80 págs)</p><input type="file" accept=".pdf" onChange={e=>setFile(e.target.files[0])} style={{display:"none"}} id="pdf-input"/><label htmlFor="pdf-input" style={{...btn("#f0f0f0",AZ),cursor:"pointer"}}>{file?"Cambiar archivo":"Seleccionar PDF"}</label></div>{error&&<p style={{color:L.danger,fontSize:12,marginBottom:12,background:L.dangerBg,padding:"8px 12px",borderRadius:4}}>⚠ {error}</p>}<button onClick={handleExtract} disabled={!file||loading} style={{...btn(file&&!loading?AZ:"#ccc"),width:"100%"}}>{loading?"⏳ Analizando EEFF con Claude AI...":"✨ Extraer covenants con IA"}</button></>)}
+    {step==="upload"&&(<>
+      {/* Mode selector tabs */}
+      <div style={{display:"flex",gap:0,marginBottom:16,border:`1px solid ${L.border}`,borderRadius:6,overflow:"hidden"}}>
+        {[["direct","📄 PDF directo","< 80 páginas"],["smart","🧠 Modo inteligente","Cualquier tamaño"]].map(([m,label,sub])=>(
+          <button key={m} onClick={()=>{setMode(m);setFile(null);setError("");}}
+            style={{flex:1,padding:"10px 12px",border:"none",cursor:"pointer",fontFamily:"inherit",background:mode===m?AZ:"#f8f9fb",color:mode===m?"#fff":"#2d3142",borderRight:m==="direct"?`1px solid ${L.border}`:"none",textAlign:"center"}}>
+            <div style={{fontSize:13,fontWeight:600}}>{label}</div>
+            <div style={{fontSize:10,opacity:0.7,marginTop:2}}>{sub}</div>
+          </button>
+        ))}
+      </div>
+      {/* Mode description */}
+      {mode==="direct"&&<div style={{background:"rgba(55,81,114,0.05)",borderRadius:5,padding:"8px 12px",marginBottom:14,fontSize:11,color:L.sub}}>Sube un PDF de <strong>máximo 80 páginas</strong>. Recomendado: balance general + EERR + notas de bonos extraídos del EEFF completo.</div>}
+      {mode==="smart"&&<div style={{background:"rgba(101,169,124,0.08)",border:`1px solid ${L.ok}`,borderRadius:5,padding:"8px 12px",marginBottom:14,fontSize:11,color:"rgb(40,100,60)"}}>Sube el <strong>EEFF completo</strong> (cualquier tamaño). El sistema detecta automáticamente las páginas con el balance, EERR y notas de bonos antes de enviarlo a Claude.</div>}
+      <div style={{border:`2px dashed ${L.border}`,borderRadius:6,padding:28,textAlign:"center",marginBottom:14,background:file?"rgba(55,81,114,0.03)":"#fafafa"}}>
+        <div style={{fontSize:24,marginBottom:6}}>{mode==="smart"?"🧠":"📄"}</div>
+        <p style={{color:AZ,fontWeight:500,marginBottom:6}}>{file?file.name:mode==="smart"?"Sube el EEFF completo":"Sube el PDF del EEFF"}</p>
+        <p style={{color:L.sub,fontSize:11,marginBottom:14}}>{mode==="smart"?"PDF de cualquier tamaño — se extraerán las páginas relevantes automáticamente":"Balance general + EERR + notas de bonos (máx 80 págs)"}</p>
+        <input type="file" accept=".pdf" onChange={e=>setFile(e.target.files[0])} style={{display:"none"}} id="pdf-input"/>
+        <label htmlFor="pdf-input" style={{...btn("#f0f0f0",AZ),cursor:"pointer",fontSize:12}}>{file?"Cambiar archivo":"Seleccionar PDF"}</label>
+      </div>
+      {error&&<p style={{color:L.danger,fontSize:12,marginBottom:12,background:L.dangerBg,padding:"8px 12px",borderRadius:4}}>⚠ {error}</p>}
+      <button onClick={handleExtract} disabled={!file||loading} style={{...btn(file&&!loading?AZ:"#ccc"),width:"100%"}}>
+        {loading?(mode==="smart"?"⏳ Extrayendo páginas relevantes y analizando...":"⏳ Analizando EEFF con Claude AI..."):(mode==="smart"?"🧠 Analizar PDF completo inteligentemente":"✨ Extraer covenants con IA")}
+      </button>
+    </>)}
 
     {step==="confirm"&&(<>
       <div style={{background:"rgba(55,81,114,0.06)",border:`1px solid rgba(55,81,114,0.2)`,borderRadius:6,padding:"10px 14px",marginBottom:14,fontSize:12}}>
-        <strong>Período: {fechaEEFF}</strong>
+        <strong>Período: {fechaEEFF}</strong>{result?._smartInfo&&<span style={{color:L.sub,marginLeft:8,fontSize:11}}>📄 PDF de {result._smartInfo.totalPages} págs → se analizaron {result._smartInfo.selectedCount} páginas relevantes</span>}
         {newlyFound.length>0&&<span style={{color:"rgb(40,120,70)",marginLeft:8}}>✓ {newlyFound.length} covenant{newlyFound.length!==1?"s":""} nuevos detectados</span>}
         {notFound.length>0&&<span style={{color:L.warn,marginLeft:8}}>⚠ {notFound.length} no encontrado{notFound.length!==1?"s":""}</span>}
       </div>
