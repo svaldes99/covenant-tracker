@@ -465,7 +465,7 @@ function NewIssuerModal({ onClose, onSuccess, allIssuers }) {
       const res = await fetch("/api/extract-pdf", { method:"POST", body:fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      const found = (data.covenants || []).map(c => ({ ...c, tipo:c.tipo||"flujo", op:c.op||">=", lim:c.lim||null, limite:c.limite||"", unidad:c.unidad||"x (veces)", actualVal:c.act!=null?String(c.act):"", _id:Math.random(), _needsInput:c.actual===null }));
+      const found = (data.covenants || []).map(c => ({ ...c, tipo:c.tipo||"flujo", op:c.op||">=", lim:c.lim||null, limite:c.limite||"", unidad:c.unidad||"x (veces)", actualVal:c.act!=null?String(c.act):"", _id:Math.random(), _needsInput:c.actual===null&&!c.no_calculado, _no_calculado:c.no_calculado||false, _razon_no_calculado:c.razon_no_calculado||null }));
       setDetected(found); setFechaEEFF(data.fechaEEFF || ""); setStep("review");
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
@@ -489,7 +489,7 @@ function NewIssuerModal({ onClose, onSuccess, allIssuers }) {
   const btn = (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit" });
   const inp = { border:`1px solid ${L.border}`, borderRadius:4, padding:"8px 10px", fontSize:13, fontFamily:"inherit", outline:"none", width:"100%" };
   const sinp = (w) => ({ border:`1px solid ${L.border}`, borderRadius:4, padding:"5px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:w||"100%" });
-  const missingRequired = detected.filter(r => r.name.trim() && r._needsInput && !parseNum(r.actualVal));
+  const missingRequired = detected.filter(r => r.name.trim() && r._needsInput && !r._no_calculado && !parseNum(r.actualVal));
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:step==="review"?820:480, maxHeight:"90vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
@@ -641,8 +641,8 @@ function UploadModal({ issuer, onClose, onSuccess }) {
       const res = await fetch("/api/extract-pdf", { method:"POST", body:fd });
       const data = await res.json(); if (!res.ok) throw new Error(data.error);
       const detectedMap = {}; (data.covenants || []).forEach(c => { detectedMap[c.name] = c; });
-      const existingUpdated = issuer.covenants.map(cov => { const d = detectedMap[cov.name]; return { ...cov, unidad:cov.unidad||"x (veces)", actualVal:d?.actual!=null?String(d.actual):"", _found:d?.actual!=null, _nota:d?.nota||"", _isNew:false, _id:Math.random() }; });
-      const newlyDetected = (data.covenants || []).filter(c => !issuer.covenants.find(x => x.name===c.name) && c.actual!=null).map(c => ({ name:c.name, tipo:c.tipo||"flujo", op:c.op||">=", lim:c.lim||null, limite:c.limite||"", unidad:c.unidad||"x (veces)", actualVal:String(c.actual), _found:true, _nota:c.nota||"detectado en PDF", _isNew:true, _id:Math.random() }));
+      const existingUpdated = issuer.covenants.map(cov => { const d = detectedMap[cov.name]; return { ...cov, unidad:cov.unidad||"x (veces)", actualVal:d?.actual!=null?String(d.actual):"", _found:d?.actual!=null, _no_calculado:d?.no_calculado||false, _razon_no_calculado:d?.razon_no_calculado||null, _nota:d?.nota||"", _isNew:false, _id:Math.random() }; });
+      const newlyDetected = (data.covenants || []).filter(c => !issuer.covenants.find(x => x.name===c.name)).map(c => ({ name:c.name, tipo:c.tipo||"flujo", op:c.op||">=", lim:c.lim||null, limite:c.limite||"", unidad:c.unidad||"x (veces)", actualVal:c.actual!=null?String(c.actual):"", _found:c.actual!=null, _nota:c.nota||"detectado en PDF", _no_calculado:c.no_calculado||false, _razon_no_calculado:c.razon_no_calculado||null, _isNew:true, _id:Math.random() }));
       setRows([...existingUpdated, ...newlyDetected]); setFechaEEFF(data.fechaEEFF || ""); setResult(data); setStep("confirm");
     } catch(e) { setError(e.message); } finally { setLoading(false); }
   }
@@ -672,7 +672,7 @@ function UploadModal({ issuer, onClose, onSuccess }) {
   }
   const btn = (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit" });
   const sinp = (w) => ({ border:`1px solid ${L.border}`, borderRadius:4, padding:"4px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:w||"100%" });
-  const newlyFound = rows.filter(r => r._isNew); const notFound = rows.filter(r => !r._found && !r._isNew);
+  const newlyFound = rows.filter(r => r._isNew && r._found); const notFound = rows.filter(r => !r._found && !r._isNew); const noCalculado = rows.filter(r => r._no_calculado);
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:step==="confirm"?900:540, maxHeight:"90vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
@@ -712,7 +712,15 @@ function UploadModal({ issuer, onClose, onSuccess }) {
                 {notFound.length > 0 && <span style={{ color:L.warn, marginLeft:8 }}>⚠ {notFound.length} no encontrado{notFound.length!==1?"s":""}</span>}
               </div>
               {newlyFound.length > 0 && <div style={{ background:"rgba(101,169,124,0.08)", border:`1px solid ${L.ok}`, borderRadius:5, padding:"7px 12px", marginBottom:10, fontSize:12 }}><strong style={{ color:"rgb(40,120,70)" }}>✓ Nuevos covenants: </strong>{newlyFound.map(r=>r.name).join(", ")}</div>}
-              {notFound.length > 0 && <div style={{ background:L.warnBg, border:`1px solid ${L.warn}`, borderRadius:5, padding:"7px 12px", marginBottom:10, fontSize:12 }}><strong style={{ color:"rgb(120,90,10)" }}>⚠ Sin datos: </strong>{notFound.map(r=>r.name).join(", ")}<div style={{ color:L.sub, marginTop:3, fontSize:11 }}>Ingrésalos manualmente.</div></div>}
+              {notFound.length > 0 && <div style={{ background:L.warnBg, border:`1px solid ${L.warn}`, borderRadius:5, padding:"7px 12px", marginBottom:10, fontSize:12 }}><strong style={{ color:"rgb(120,90,10)" }}>⚠ Sin datos en PDF: </strong>{notFound.map(r=>r.name).join(", ")}<div style={{ color:L.sub, marginTop:3, fontSize:11 }}>Ingrésalos manualmente en la tabla.</div></div>}
+              {noCalculado.length > 0 && <div style={{ background:"rgba(214,158,46,0.06)", border:`1px solid ${L.warn}`, borderRadius:5, padding:"7px 12px", marginBottom:10, fontSize:12 }}>
+                <strong style={{ color:"rgb(120,90,10)" }}>⚠ No se pudo calcular:</strong>
+                {noCalculado.map(r => (
+                  <div key={r._id} style={{ marginTop:4, color:L.sub, fontSize:11 }}>
+                    <strong style={{ color:"#2d3142" }}>{r.name}:</strong> {r._razon_no_calculado || "Datos insuficientes en el PDF"}
+                  </div>
+                ))}
+              </div>}
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
                 <p style={{ fontSize:11, fontWeight:600, color:AZ, textTransform:"uppercase", letterSpacing:0.5 }}>Lista completa de covenants</p>
                 <div style={{ display:"flex", gap:8, alignItems:"center" }}><label style={{ fontSize:10, color:L.sub }}>Período:</label><input style={sinp(90)} value={fechaEEFF} onChange={e => setFechaEEFF(e.target.value)} /></div>
@@ -735,7 +743,14 @@ function UploadModal({ issuer, onClose, onSuccess }) {
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}`, minWidth:95 }}><CreatableSelect value={unit} onChange={v=>{updateRow(r._id,"unidad",v);if(!allUnits.includes(v))setAllUnits(p=>[...p,v]);}} options={allUnits} placeholder="Unidad" width="90px"/></td>
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}` }}><input style={{ ...sinp(70), borderColor:!r._found&&!parseNum(r.actualVal)?"rgb(214,158,46)":st==="breach"?L.danger:st==="warning"?L.warn:L.border }} placeholder={!r._found?"manual":"valor"} value={r.actualVal} onChange={e=>updateRow(r._id,"actualVal",e.target.value)}/></td>
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}`, whiteSpace:"nowrap" }}>{holgura!==null?<span style={{ color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub, fontWeight:500, fontSize:11 }}>{fmtNum(holgura,unit)}</span>:<span style={{ color:"#ccc" }}>—</span>}</td>
-                          <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}`, fontSize:10, color:L.sub, maxWidth:100, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r._nota||(!r._found?"sin datos":"—")}</td>
+                          <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}`, fontSize:10, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                            {r._no_calculado
+                              ? <span style={{ color:L.warn, fontStyle:"italic" }} title={r._razon_no_calculado||"No se pudo calcular"}>⚠ No calculado</span>
+                              : r._nota
+                                ? <span style={{ color:L.sub }} title={r._nota}>{r._nota.length > 30 ? r._nota.substring(0,28)+"…" : r._nota}</span>
+                                : (!r._found ? <span style={{ color:"#ccc" }}>sin datos</span> : <span style={{ color:L.sub }}>—</span>)
+                            }
+                          </td>
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}` }}><button onClick={()=>removeRow(r._id)} style={{ background:L.dangerBg, color:"rgb(170,40,50)", border:"none", borderRadius:4, padding:"3px 6px", cursor:"pointer", fontSize:10 }}>✕</button></td>
                         </tr>
                       );

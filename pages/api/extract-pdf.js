@@ -4,22 +4,17 @@ import fs from "fs";
 
 export const config = { api: { bodyParser: false } };
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MAX_B64_CHARS = 25 * 1024 * 1024; // ~80 pages
+const MAX_B64_CHARS = 25 * 1024 * 1024;
 
-// Keywords to identify relevant pages for smart extraction
 const KEYWORDS = [
-  // Covenants / resguardos
   "resguardo","covenant","restriccion financiera","restricción financiera",
   "financial covenant","ratio de bonos","obligaciones financieras","covenants de bonos",
-  // Balance sheet
   "balance general","estado de situacion financiera","estado de situación financiera",
   "activos corrientes","pasivos corrientes","patrimonio neto","total patrimonio",
   "pasivos financieros","deuda financiera","efectivo y equivalentes",
-  // Income statement
   "estado de resultados","resultado operacional","ingresos de actividades",
   "ganancia bruta","ebitda","depreciacion","depreciación","amortizacion","amortización",
   "costos financieros","ingresos financieros","resultado antes",
-  // Debt notes
   "obligaciones con el publico","bonos en circulacion","bonos en circulación",
   "linea de bonos","línea de bonos","emisiones de bonos","instrumentos financieros",
   "deuda neta","dfn","leverage","cobertura de gastos"
@@ -37,12 +32,9 @@ function scorePageText(text) {
 async function extractSmartPages(pdfBuffer) {
   let pdfParse;
   try { pdfParse = (await import("pdf-parse")).default; } catch(e) { return null; }
-
   const data = await pdfParse(pdfBuffer);
   const totalPages = data.numpages;
-  if (totalPages <= 80) return null; // no need to filter
-
-  // Parse page by page
+  if (totalPages <= 80) return null;
   const pageScores = [];
   for (let p = 1; p <= totalPages; p++) {
     const pageData = await pdfParse(pdfBuffer, { max: p });
@@ -50,12 +42,9 @@ async function extractSmartPages(pdfBuffer) {
     const pageText = pageData.text.slice(prevData.text.length);
     pageScores.push({ page: p, score: scorePageText(pageText), text: pageText });
   }
-
-  // Sort by score, take top pages up to 70, always include first 5 pages (cover/index)
   const firstPages = pageScores.slice(0, 5);
   const rest = pageScores.slice(5).sort((a,b) => b.score - a.score).slice(0, 65);
   const selected = [...firstPages, ...rest].sort((a,b) => a.page - b.page);
-  
   return { selected, totalPages, selectedCount: selected.length };
 }
 
@@ -76,29 +65,22 @@ export default async function handler(req, res) {
       const pdfBuffer = fs.readFileSync(file.filepath);
       let base64PDF = pdfBuffer.toString("base64");
       let smartInfo = null;
+      let smartText = null;
 
       if (smartMode) {
-        // Smart extraction: find relevant pages
         try {
           const smart = await extractSmartPages(pdfBuffer);
           if (smart) {
-            // Rebuild PDF with only selected pages using pdf-parse text
-            // Since we can't rebuild PDF easily, we send the text content directly
             const combinedText = smart.selected.map(p => `--- Página ${p.page} ---\n${p.text}`).join("\n\n");
             smartInfo = { totalPages: smart.totalPages, selectedCount: smart.selectedCount };
-            // Encode combined text as a plain text approach
-            base64PDF = Buffer.from(combinedText).toString("base64");
-            // Flag to use text instead of PDF
-            res._smartText = combinedText;
-            res._smartInfo = smartInfo;
+            smartText = combinedText;
           }
         } catch(e) {
-          console.error("Smart extraction failed, falling back to truncation:", e.message);
+          console.error("Smart extraction failed:", e.message);
         }
       }
 
-      // Truncate if still too large
-      if (base64PDF.length > MAX_B64_CHARS) {
+      if (!smartText && base64PDF.length > MAX_B64_CHARS) {
         base64PDF = base64PDF.substring(0, MAX_B64_CHARS);
       }
 
@@ -111,52 +93,94 @@ export default async function handler(req, res) {
           calculateExtra.map(c => `- "${c.name}" | tipo: ${c.tipo} | operador: ${c.op} | límite: ${c.lim}`).join("\n")
         : "";
 
+      // IMPROVED PROMPT: always try to calculate, mark explicitly when not possible
       const detectInstructions = detectMode
-        ? `TAREA ESPECIAL: Este es un emisor nuevo. Detecta TODOS los covenants de bonos que encuentres en el documento (resguardos financieros, restricciones de bonos, ratios exigidos). Para cada uno identifica: nombre del ratio, tipo (flujo/stock), operador (<=/>= ), límite numérico y valor actual.`
-        : `Extrae o calcula los valores actuales de estos covenants financieros DE BONOS:\n${covenantList}${extraList}`;
+        ? `TAREA: Este es un emisor NUEVO. Haz DOS cosas:
+1. Detecta TODOS los covenants de bonos (resguardos financieros, restricciones, ratios exigidos).
+2. Para CADA covenant detectado, SIEMPRE intenta calcular o encontrar el valor actual en el EEFF.
+   - Primero busca si está calculado explícitamente en las notas de resguardos.
+   - Si no, calcula tú mismo usando los estados financieros (balance + EERR).
+   - Solo marca "no_calculado": true si definitivamente no hay datos suficientes en el documento.`
+        : `TAREA: Para CADA covenant de la lista, SIEMPRE intenta calcular o encontrar el valor actual.
+   - Primero busca si está calculado explícitamente en las notas de resguardos del PDF.
+   - Si no aparece directamente, calcula tú mismo usando balance general + EERR.
+   - Solo deja "actual": null si definitivamente no hay datos suficientes en el PDF.
 
-      const prompt = `Eres analista financiero experto en bonos corporativos chilenos.
+Covenants a actualizar:
+${covenantList}${extraList}`;
+
+      const prompt = `Eres analista financiero senior experto en bonos corporativos chilenos y análisis de EEFF.
 Se te entrega documentación financiera de "${issuerName}".
-${smartInfo ? `(PDF de ${smartInfo.totalPages} páginas — se analizaron ${smartInfo.selectedCount} páginas relevantes con balance, EERR y notas de bonos)` : ""}
+${smartInfo ? `(PDF de ${smartInfo.totalPages} páginas — se analizaron ${smartInfo.selectedCount} páginas relevantes)` : ""}
 
 ${detectInstructions}
 
-DÓNDE BUSCAR:
-1. Notas con títulos: "Restricciones financieras", "Resguardos financieros", "Covenants de bonos", "Contingencias y restricciones", "Bonos y obligaciones"
-2. Si no están explícitos, calcula desde los EEFF:
-   - DFN = Pasivos financieros con costo - Efectivo y equivalentes
-   - EBITDA = Resultado operacional + Depreciación y amortización
-   - GFN = Costos financieros - Ingresos financieros
-   - Patrimonio = Total patrimonio atribuible a controladores
-   - Leverage = DF / Patrimonio
-   - Cobertura = EBITDA / GFN
-3. SOLO covenants de BONOS. Ignora créditos bancarios.
-4. Para holgura: op="<=" → holgura = límite - actual. op=">=" → holgura = actual - límite.
+INSTRUCCIONES DE CÁLCULO (usa estas fórmulas si el valor no está explícito):
+- DFN (Deuda Financiera Neta) = Pasivos financieros con costo (corrientes + no corrientes) - Efectivo y equivalentes al efectivo
+- EBITDA = Resultado operacional (EBIT) + Depreciación del período + Amortización del período
+- GFN (Gastos Financieros Netos) = Costos financieros - Ingresos financieros
+- Cobertura de GFN = EBITDA / GFN
+- Leverage = Deuda Financiera Total / Patrimonio total atribuible a controladores
+- DFN/EBITDA = DFN / EBITDA
+- DFN/Patrimonio = DFN / Patrimonio
+- Patrimonio = Total patrimonio atribuible a controladores (no incluir interés minoritario)
 
-Responde ÚNICAMENTE con JSON válido:
+DÓNDE BUSCAR:
+1. Notas tituladas: "Restricciones financieras", "Resguardos financieros", "Covenants", "Contingencias"
+2. Estado de Situación Financiera (Balance) → para activos, pasivos, patrimonio, deuda financiera
+3. Estado de Resultados → para ingresos, costos, resultado operacional, gastos financieros
+4. Notas de depreciación/amortización → para calcular EBITDA
+5. IMPORTANTE: Usa los valores del período más reciente del EEFF (no comparativos)
+
+REGLAS:
+- SOLO covenants de BONOS. Ignora líneas de crédito bancario.
+- Si encuentras el valor directamente en las notas de resguardos, úsalo tal como está.
+- Si lo calculas tú mismo, indica en "nota" qué cifras usaste y dónde las encontraste.
+- Si NO puedes calcular (falta información), pon "actual": null, "no_calculado": true, "razon_no_calculado": "descripción específica de qué dato falta".
+- Redondea a 2 decimales.
+- Formato numérico chileno: usa punto para miles y coma para decimales.
+
+Responde ÚNICAMENTE con JSON válido (sin texto adicional):
 {
   "fechaEEFF": "mmm-aa",
   "encontrados": true,
-  "resumen": "descripción de dónde se encontraron los datos",
+  "resumen": "descripción breve de qué se encontró y qué se calculó",
   "covenants": [
     {
-      "name": "nombre exacto",
+      "name": "nombre exacto del covenant",
       "tipo": "flujo o stock",
       "op": "<= o >=",
       "lim": 3.5,
-      "limite": "3,50x",
+      "limite": "3,50 x",
       "actual": 1.23,
-      "actualStr": "1,23x",
-      "holgura": 0.45,
-      "holguraStr": "0,45x",
+      "actualStr": "1,23 x",
+      "holgura": 2.27,
+      "holguraStr": "2,27 x",
       "encontrado": true,
-      "nota": "fuente del dato"
+      "nota": "encontrado directamente en nota de resguardos / calculado: EBITDA=X, GFN=Y de pág Z",
+      "no_calculado": false,
+      "razon_no_calculado": null
+    },
+    {
+      "name": "covenant sin datos",
+      "tipo": "flujo",
+      "op": ">=",
+      "lim": 2.0,
+      "limite": "2,00 x",
+      "actual": null,
+      "actualStr": null,
+      "holgura": null,
+      "holguraStr": null,
+      "encontrado": false,
+      "nota": null,
+      "no_calculado": true,
+      "razon_no_calculado": "No se encontró el estado de resultados ni las notas de gastos financieros en el PDF"
     }
   ]
 }`;
 
-      const messageContent = res._smartText
-        ? [{ type:"text", text: `Contenido del EEFF (páginas relevantes extraídas):\n\n${res._smartText}\n\n${prompt}` }]
+      const messageContent = smartText
+        ? [{ type:"text", text: `Contenido del EEFF (páginas relevantes extraídas):\n\n${smartText}\n\n${prompt}` }]
         : [
             { type:"document", source:{ type:"base64", media_type:"application/pdf", data:base64PDF } },
             { type:"text", text: prompt }
@@ -164,7 +188,7 @@ Responde ÚNICAMENTE con JSON válido:
 
       const response = await client.messages.create({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 3000,
+        max_tokens: 4000,
         messages: [{ role:"user", content: messageContent }]
       });
 
