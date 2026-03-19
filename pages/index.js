@@ -4,6 +4,112 @@ const AZ="rgb(55,81,114)";
 const L={ok:"rgb(101,169,124)",okBg:"rgba(101,169,124,0.12)",warn:"rgb(214,158,46)",warnBg:"rgba(214,158,46,0.12)",danger:"rgb(210,70,80)",dangerBg:"rgba(210,70,80,0.1)",sub:"#7a7f9a",border:"rgba(0,0,0,0.07)",bg:"#f0f2f5"};
 function Dot({status,size=8}){const c={ok:L.ok,warning:L.warn,breach:L.danger,na:"#ccc"};return<span style={{display:"inline-block",width:size,height:size,borderRadius:"50%",background:c[status]||"#ccc",flexShrink:0}}/>;}
 function Pill({status}){const st={ok:{background:L.okBg,color:"rgb(40,120,70)"},warning:{background:L.warnBg,color:"rgb(150,110,20)"},breach:{background:L.dangerBg,color:"rgb(170,40,50)"},na:{background:"#f0f0f0",color:L.sub}};const lb={ok:"Cumple",warning:"En riesgo",breach:"Incumple",na:"S/D"};return<span style={{...st[status]||st.na,borderRadius:4,padding:"2px 8px",fontSize:11,fontWeight:500}}>{lb[status]||"S/D"}</span>;}
+
+function EditModal({issuer,onClose,onSuccess}){
+  const[values,setValues]=useState(()=>{
+    const v={};
+    issuer.covenants.forEach(c=>{v[c.name]={actual:c.act??'',holgura:c.holgura||''};});
+    return v;
+  });
+  const[fechaEEFF,setFechaEEFF]=useState(issuer.fechaEEFF||'');
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState('');
+
+  async function handleSave(){
+    setLoading(true);setError('');
+    try{
+      const covenants=issuer.covenants.map(c=>{
+        const v=values[c.name];
+        const num=parseFloat(String(v.actual).replace(',','.'));
+        const lim=c.lim;
+        let holgura=null,holguraStr=null;
+        if(!isNaN(num)&&lim!==null){
+          holgura=c.op==="<="?lim-num:num-lim;
+          holguraStr=(holgura>=0?'':'')+holgura.toFixed(2).replace('.',',')+' x';
+        }
+        return{
+          name:c.name,
+          actual:isNaN(num)?null:num,
+          actualStr:isNaN(num)?null:num.toFixed(2).replace('.',',')+' x',
+          holgura:holgura,
+          holguraStr:v.holgura||holguraStr
+        };
+      });
+      const res=await fetch('/api/issuers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issuerId:issuer.id,covenants,fechaEEFF})});
+      if(!res.ok)throw new Error('Error guardando');
+      onSuccess();
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  }
+
+  const ov={position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16};
+  const md={background:"#fff",borderRadius:8,width:"100%",maxWidth:580,maxHeight:"90vh",overflow:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"};
+  const btn=(bg=AZ,col="#fff")=>({background:bg,color:col,border:"none",borderRadius:4,padding:"9px 18px",cursor:"pointer",fontSize:13,fontWeight:500,fontFamily:"inherit"});
+  const inp={border:`1px solid ${L.border}`,borderRadius:4,padding:"6px 10px",fontSize:12,fontFamily:"inherit",width:"100%",outline:"none"};
+
+  return(
+    <div style={ov} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={md}>
+        <div style={{padding:"20px 24px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontSize:15,fontWeight:600,color:AZ}}>{issuer.name}</div><div style={{fontSize:12,color:L.sub}}>Editar covenants manualmente</div></div>
+          <button onClick={onClose} style={{...btn("#f0f0f0","#666"),padding:"6px 12px"}}>✕</button>
+        </div>
+        <div style={{padding:24}}>
+          <div style={{marginBottom:16}}>
+            <label style={{fontSize:11,color:L.sub,display:"block",marginBottom:4,fontWeight:600}}>PERÍODO EEFF</label>
+            <input style={{...inp,width:160}} placeholder="ej: dic-24" value={fechaEEFF} onChange={e=>setFechaEEFF(e.target.value)}/>
+          </div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead>
+              <tr>
+                {["Covenant","Tipo","Límite","Valor actual","Holgura"].map(h=>(
+                  <th key={h} style={{textAlign:"left",padding:"7px 10px",background:AZ,color:"#fff",fontSize:10,fontWeight:500}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {issuer.covenants.map((c,i)=>{
+                const v=values[c.name];
+                const num=parseFloat(String(v.actual).replace(',','.'));
+                const st=!isNaN(num)&&c.lim!==null?getStatus({...c,act:num}):"na";
+                return(
+                  <tr key={i} style={{background:i%2===0?"#fff":"#fafafa"}}>
+                    <td style={{padding:"8px 10px",borderBottom:`1px solid ${L.border}`,fontWeight:500,maxWidth:180}}>{c.name}</td>
+                    <td style={{padding:"8px 10px",borderBottom:`1px solid ${L.border}`,color:L.sub}}>{c.tipo}</td>
+                    <td style={{padding:"8px 10px",borderBottom:`1px solid ${L.border}`,color:L.sub}}>{c.limite}</td>
+                    <td style={{padding:"8px 10px",borderBottom:`1px solid ${L.border}`}}>
+                      <input
+                        style={{...inp,width:90,borderColor:st==="breach"?L.danger:st==="warning"?L.warn:L.border}}
+                        placeholder="ej: 2.50"
+                        value={v.actual}
+                        onChange={e=>setValues(prev=>({...prev,[c.name]:{...prev[c.name],actual:e.target.value}}))}
+                      />
+                    </td>
+                    <td style={{padding:"8px 10px",borderBottom:`1px solid ${L.border}`}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        {!isNaN(num)&&c.lim!==null?(
+                          <span style={{color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub,fontSize:12,fontWeight:500}}>
+                            {(c.op==="<="?c.lim-num:num-c.lim).toFixed(2).replace('.',',')}x
+                          </span>
+                        ):<span style={{color:"#ccc"}}>—</span>}
+                        <Dot status={st}/>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {error&&<p style={{color:L.danger,fontSize:12,marginTop:12,background:L.dangerBg,padding:"8px 12px",borderRadius:4}}>⚠ {error}</p>}
+          <div style={{display:"flex",gap:8,marginTop:16}}>
+            <button onClick={onClose} style={{...btn("#f0f0f0","#666"),flex:1}}>Cancelar</button>
+            <button onClick={handleSave} disabled={loading} style={{...btn(),flex:2}}>{loading?"Guardando...":"✓ Guardar cambios"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UploadModal({issuer,onClose,onSuccess}){
   const[file,setFile]=useState(null);
   const[loading,setLoading]=useState(false);
@@ -40,13 +146,9 @@ function UploadModal({issuer,onClose,onSuccess}){
               <div style={{border:`2px dashed ${L.border}`,borderRadius:6,padding:32,textAlign:"center",marginBottom:16,background:file?"rgba(55,81,114,0.03)":"#fafafa"}}>
                 <div style={{fontSize:28,marginBottom:8}}>📄</div>
                 <p style={{color:AZ,fontWeight:500,marginBottom:8}}>{file?file.name:"Sube el PDF del EEFF"}</p>
-                <p style={{color:L.sub,fontSize:12,marginBottom:16}}>Balance general, estado de resultados o memoria anual</p>
+                <p style={{color:L.sub,fontSize:12,marginBottom:16}}>Balance general, estado de resultados o memoria anual (máx ~80 págs)</p>
                 <input type="file" accept=".pdf" onChange={e=>setFile(e.target.files[0])} style={{display:"none"}} id="pdf-input"/>
                 <label htmlFor="pdf-input" style={{...btn("#f0f0f0",AZ),cursor:"pointer"}}>{file?"Cambiar archivo":"Seleccionar PDF"}</label>
-              </div>
-              <div style={{background:"#f8f9fa",borderRadius:6,padding:12,marginBottom:16}}>
-                <p style={{fontSize:12,fontWeight:600,color:AZ,marginBottom:8}}>Covenants a actualizar:</p>
-                {issuer.covenants.map((c,i)=><div key={i} style={{fontSize:12,color:L.sub,padding:"3px 0",borderBottom:i<issuer.covenants.length-1?`1px solid ${L.border}`:"none"}}>{c.name} <span style={{color:AZ}}>({c.op} {c.lim}x)</span></div>)}
               </div>
               {error&&<p style={{color:L.danger,fontSize:12,marginBottom:12,background:L.dangerBg,padding:"8px 12px",borderRadius:4}}>⚠ {error}</p>}
               <button onClick={handleExtract} disabled={!file||loading} style={{...btn(file&&!loading?AZ:"#ccc"),width:"100%"}}>
@@ -72,12 +174,14 @@ function UploadModal({issuer,onClose,onSuccess}){
     </div>
   );
 }
+
 export default function App(){
   const[issuers,setIssuers]=useState([]);
   const[loading,setLoading]=useState(true);
   const[view,setView]=useState("dashboard");
   const[selId,setSelId]=useState(null);
   const[uploadIssuer,setUploadIssuer]=useState(null);
+  const[editIssuer,setEditIssuer]=useState(null);
   const[search,setSearch]=useState("");
   const[filterStatus,setFilterStatus]=useState("all");
   const[filterSector,setFilterSector]=useState("all");
@@ -96,16 +200,22 @@ export default function App(){
   const Dashboard=()=>{const sd=useMemo(()=>{const m={};issuers.forEach(iss=>{if(!m[iss.sector])m[iss.sector]={ok:0,warning:0,breach:0,total:0};const st=issuerStatus(iss);m[iss.sector][st]=(m[iss.sector][st]||0)+1;m[iss.sector].total++;});return Object.entries(m).sort((a,b)=>(b[1].breach+b[1].warning)-(a[1].breach+a[1].warning)).slice(0,8);},[]);
     return(<div><Header title="Dashboard de Covenants" sub={`${stats.issuers} emisores · ${allCovs.filter(c=>c.status!=="na").length} covenants monitoreados`}/>
       <div style={{display:"flex",gap:12,marginBottom:20}}>{[["Emisores",stats.issuers,"#7a7f9a"],["✓ Cumple",stats.ok,L.ok],["⚠ En riesgo",stats.warning,L.warn],["✗ Incumple",stats.breach,L.danger]].map(([l,v,col])=>(<div key={l} style={{flex:1,background:"#fff",borderRadius:6,padding:"16px 20px",border:`1px solid ${L.border}`,borderTop:`3px solid ${col}`}}><div style={{fontSize:28,fontWeight:700,color:col}}>{v}</div><div style={{fontSize:10,color:L.sub,marginTop:5,textTransform:"uppercase",letterSpacing:0.5}}>{l}</div></div>))}</div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
         <div style={s.card}><p style={{fontSize:11,fontWeight:600,color:AZ,marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>Estado por sector</p>{sd.map(([sector,d])=>(<div key={sector} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><div style={{width:130,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{sector}</div><div style={{flex:1,height:8,background:"#eee",borderRadius:2,overflow:"hidden",display:"flex"}}>{d.breach>0&&<div style={{width:`${(d.breach/d.total)*100}%`,background:L.danger}}/>}{d.warning>0&&<div style={{width:`${(d.warning/d.total)*100}%`,background:L.warn}}/>}{d.ok>0&&<div style={{width:`${(d.ok/d.total)*100}%`,background:L.ok}}/>}</div><div style={{fontSize:10,color:L.sub,width:18,textAlign:"right"}}>{d.total}</div></div>))}</div>
         <div style={s.card}><p style={{fontSize:11,fontWeight:600,color:AZ,marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>Alertas principales</p>{alertCovs.length===0?<div style={{textAlign:"center",padding:24,color:L.ok}}>✓ Todos en cumplimiento</div>:alertCovs.slice(0,7).map((c,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${L.border}`}}><div><span style={{fontWeight:600,color:AZ,cursor:"pointer",fontSize:12}} onClick={()=>{setSelId(c.issuerId);setView("emisores");}}>{c.issuerName}</span><div style={{color:L.sub,fontSize:11}}>{c.name}</div></div><Pill status={c.status}/></div>))}</div>
       </div></div>);};
-  const Emisores=()=>(<div><Header title="Emisores" sub="Haz clic en un emisor o sube un EEFF"/>
+  const Emisores=()=>(<div><Header title="Emisores" sub="Haz clic en un emisor para ver detalles"/>
     <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}><input style={{...s.inp,width:200}} placeholder="Buscar emisor..." value={search} onChange={e=>setSearch(e.target.value)}/><select style={s.sel} value={filterSector} onChange={e=>setFilterSector(e.target.value)}><option value="all">Todos los sectores</option>{sectors.filter(x=>x!=="all").map(x=><option key={x} value={x}>{x}</option>)}</select><select style={s.sel} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Todos los estados</option><option value="ok">✓ Cumple</option><option value="warning">⚠ En riesgo</option><option value="breach">✗ Incumple</option></select></div>
     <div style={s.card}><table style={s.tbl}><thead><tr>{["","Emisor","Sector","Clasificación","EEFF","Covenants","Estado",""].map(h=><th key={h} style={s.th}>{h}</th>)}</tr></thead>
-    <tbody>{filteredIssuers.map((iss,i)=>{const st=issuerStatus(iss);const bk={breach:iss.covenants.filter(c=>getStatus(c)==="breach").length,warning:iss.covenants.filter(c=>getStatus(c)==="warning").length,ok:iss.covenants.filter(c=>getStatus(c)==="ok").length};return(<tr key={iss.id} style={{background:i%2===0?"#fff":"#fafafa",cursor:"pointer"}} onClick={()=>setSelId(iss.id)}><td style={{...s.td,width:14}}><Dot status={st}/></td><td style={{...s.td,fontWeight:600,color:AZ}}>{iss.name}</td><td style={{...s.td,color:L.sub}}>{iss.sector}</td><td style={{...s.td,fontWeight:600,color:AZ}}>{iss.clasificacion}</td><td style={{...s.td,color:isStale(iss.fechaEEFF)?L.warn:L.sub}}>{iss.fechaEEFF}{isStale(iss.fechaEEFF)?" ⚠":""}</td><td style={s.td}>{iss.covenants.length}</td><td style={s.td}><div style={{display:"flex",gap:4}}>{bk.breach>0&&<span style={{background:L.dangerBg,color:"rgb(170,40,50)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500}}>✗ {bk.breach}</span>}{bk.warning>0&&<span style={{background:L.warnBg,color:"rgb(150,110,20)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500}}>⚠ {bk.warning}</span>}{bk.ok>0&&<span style={{background:L.okBg,color:"rgb(40,120,70)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500}}>✓ {bk.ok}</span>}</div></td><td style={s.td} onClick={e=>{e.stopPropagation();setUploadIssuer(iss);}}><button style={{...s.btn("#f0f2f5",AZ),fontSize:11}}>📄 Subir EEFF</button></td></tr>);})}</tbody></table></div></div>);
-  const Detalle=()=>{if(!sel)return null;return(<div><div style={{display:"flex",gap:8,marginBottom:16}}><button style={s.btn("#f0f2f5","#666")} onClick={()=>setSelId(null)}>← Volver</button><button style={s.btn()} onClick={()=>setUploadIssuer(sel)}>📄 Subir EEFF</button></div><Header title={sel.name} sub={`${sel.sector} · ${sel.clasificacion} · EEFF ${sel.fechaEEFF}${isStale(sel.fechaEEFF)?" ⚠ desactualizado":""}`}/>{["flujo","stock"].map(tipo=>{const covs=sel.covenants.filter(c=>c.tipo===tipo);if(!covs.length)return null;return(<div key={tipo} style={{...s.card,marginBottom:16}}><p style={{fontSize:11,fontWeight:600,color:AZ,marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>Covenants de {tipo==="flujo"?"flujo":"balance"}</p><table style={s.tbl}><thead><tr>{["Covenant","Límite","Actual","Holgura","Estado"].map(h=><th key={h} style={s.th}>{h}</th>)}</tr></thead><tbody>{covs.map((c,i)=>{const st=getStatus(c);const bg=st==="breach"?"rgba(210,70,80,0.05)":st==="warning"?"rgba(214,158,46,0.05)":i%2===0?"#fff":"#fafafa";return(<tr key={i} style={{background:bg}}><td style={{...s.td,fontWeight:500}}>{c.name}</td><td style={{...s.td,color:L.sub}}>{c.limite}</td><td style={{...s.td,fontWeight:600,color:st==="breach"?L.danger:st==="warning"?L.warn:"#2d3142",fontSize:13}}>{c.actual}</td><td style={{...s.td,color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub}}>{c.holgura}</td><td style={s.td}><div style={{display:"flex",alignItems:"center",gap:6}}><Dot status={st}/><Pill status={st}/></div></td></tr>);})}</tbody></table></div>);})}</div>);};
-  const Alertas=()=>(<div><Header title="Alertas de Cumplimiento" sub={`${alertCovs.length} covenants requieren atención`}/>{alertCovs.length===0?<div style={{...s.card,textAlign:"center",padding:48,color:L.ok}}><div style={{fontSize:32}}>✓</div><p style={{fontWeight:600,marginTop:8}}>Todos en cumplimiento</p></div>:["breach","warning"].map(lvl=>{const items=alertCovs.filter(c=>c.status===lvl);if(!items.length)return null;const col=lvl==="breach"?L.danger:L.warn;return(<div key={lvl} style={{...s.card,marginBottom:16,borderLeft:`4px solid ${col}`,borderRadius:"0 6px 6px 0"}}><p style={{fontSize:11,fontWeight:600,color:col,marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>{lvl==="breach"?"✗ Incumplimiento":"⚠ En riesgo"} — {items.length} covenants</p><table style={s.tbl}><thead><tr>{["Emisor","Clasificación","Covenant","Límite","Actual","Estado",""].map(h=><th key={h} style={s.th}>{h}</th>)}</tr></thead><tbody>{items.map((c,i)=>{const iss=issuers.find(x=>x.id===c.issuerId);return(<tr key={i} style={{background:i%2===0?"#fff":"#fafafa"}}><td style={{...s.td,fontWeight:600,color:AZ,cursor:"pointer"}} onClick={()=>{setSelId(c.issuerId);setView("emisores");}}>{c.issuerName}</td><td style={{...s.td,color:AZ,fontWeight:600}}>{iss?.clasificacion}</td><td style={s.td}>{c.name}</td><td style={{...s.td,color:L.sub}}>{c.limite}</td><td style={{...s.td,fontWeight:600,color:col}}>{c.actual}</td><td style={s.td}><Pill status={c.status}/></td><td style={s.td}><button style={{...s.btn("#f0f2f5",AZ),fontSize:10}} onClick={()=>setUploadIssuer(issuers.find(x=>x.id===c.issuerId))}>📄 Actualizar</button></td></tr>);})}</tbody></table></div>);})}</div>);
+    <tbody>{filteredIssuers.map((iss,i)=>{const st=issuerStatus(iss);const bk={breach:iss.covenants.filter(c=>getStatus(c)==="breach").length,warning:iss.covenants.filter(c=>getStatus(c)==="warning").length,ok:iss.covenants.filter(c=>getStatus(c)==="ok").length};return(<tr key={iss.id} style={{background:i%2===0?"#fff":"#fafafa",cursor:"pointer"}} onClick={()=>setSelId(iss.id)}><td style={{...s.td,width:14}}><Dot status={st}/></td><td style={{...s.td,fontWeight:600,color:AZ}}>{iss.name}</td><td style={{...s.td,color:L.sub}}>{iss.sector}</td><td style={{...s.td,fontWeight:600,color:AZ}}>{iss.clasificacion}</td><td style={{...s.td,color:isStale(iss.fechaEEFF)?L.warn:L.sub}}>{iss.fechaEEFF}{isStale(iss.fechaEEFF)?" ⚠":""}</td><td style={s.td}>{iss.covenants.length}</td><td style={s.td}><div style={{display:"flex",gap:4}}>{bk.breach>0&&<span style={{background:L.dangerBg,color:"rgb(170,40,50)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500}}>✗ {bk.breach}</span>}{bk.warning>0&&<span style={{background:L.warnBg,color:"rgb(150,110,20)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500}}>⚠ {bk.warning}</span>}{bk.ok>0&&<span style={{background:L.okBg,color:"rgb(40,120,70)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500}}>✓ {bk.ok}</span>}</div></td>
+    <td style={s.td} onClick={e=>e.stopPropagation()}>
+      <div style={{display:"flex",gap:4"}}>
+        <button style={{...s.btn("#f0f2f5",AZ),fontSize:11}} onClick={()=>setUploadIssuer(iss)}>📄 PDF</button>
+        <button style={{...s.btn("rgba(55,81,114,0.1)",AZ),fontSize:11}} onClick={()=>setEditIssuer(iss)}>✏ Manual</button>
+      </div>
+    </td></tr>);})}</tbody></table></div></div>);
+  const Detalle=()=>{if(!sel)return null;return(<div><div style={{display:"flex",gap:8,marginBottom:16}}><button style={s.btn("#f0f2f5","#666")} onClick={()=>setSelId(null)}>← Volver</button><button style={s.btn()} onClick={()=>setUploadIssuer(sel)}>📄 Subir EEFF</button><button style={{...s.btn("rgba(55,81,114,0.1)",AZ)}} onClick={()=>setEditIssuer(sel)}>✏ Editar manual</button></div><Header title={sel.name} sub={`${sel.sector} · ${sel.clasificacion} · EEFF ${sel.fechaEEFF}${isStale(sel.fechaEEFF)?" ⚠ desactualizado":""}`}/>{["flujo","stock"].map(tipo=>{const covs=sel.covenants.filter(c=>c.tipo===tipo);if(!covs.length)return null;return(<div key={tipo} style={{...s.card,marginBottom:16}}><p style={{fontSize:11,fontWeight:600,color:AZ,marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>Covenants de {tipo==="flujo"?"flujo":"balance"}</p><table style={s.tbl}><thead><tr>{["Covenant","Límite","Actual","Holgura","Estado"].map(h=><th key={h} style={s.th}>{h}</th>)}</tr></thead><tbody>{covs.map((c,i)=>{const st=getStatus(c);const bg=st==="breach"?"rgba(210,70,80,0.05)":st==="warning"?"rgba(214,158,46,0.05)":i%2===0?"#fff":"#fafafa";return(<tr key={i} style={{background:bg}}><td style={{...s.td,fontWeight:500}}>{c.name}</td><td style={{...s.td,color:L.sub}}>{c.limite}</td><td style={{...s.td,fontWeight:600,color:st==="breach"?L.danger:st==="warning"?L.warn:"#2d3142",fontSize:13}}>{c.actual}</td><td style={{...s.td,color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub}}>{c.holgura}</td><td style={s.td}><div style={{display:"flex",alignItems:"center",gap:6}}><Dot status={st}/><Pill status={st}/></div></td></tr>);})}</tbody></table></div>);})}</div>);};
+  const Alertas=()=>(<div><Header title="Alertas de Cumplimiento" sub={`${alertCovs.length} covenants requieren atención`}/>{alertCovs.length===0?<div style={{...s.card,textAlign:"center",padding:48,color:L.ok}}><div style={{fontSize:32}}>✓</div><p style={{fontWeight:600,marginTop:8}}>Todos en cumplimiento</p></div>:["breach","warning"].map(lvl=>{const items=alertCovs.filter(c=>c.status===lvl);if(!items.length)return null;const col=lvl==="breach"?L.danger:L.warn;return(<div key={lvl} style={{...s.card,marginBottom:16,borderLeft:`4px solid ${col}`,borderRadius:"0 6px 6px 0"}}><p style={{fontSize:11,fontWeight:600,color:col,marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>{lvl==="breach"?"✗ Incumplimiento":"⚠ En riesgo"} — {items.length} covenants</p><table style={s.tbl}><thead><tr>{["Emisor","Clasificación","Covenant","Límite","Actual","Estado",""].map(h=><th key={h} style={s.th}>{h}</th>)}</tr></thead><tbody>{items.map((c,i)=>{const iss=issuers.find(x=>x.id===c.issuerId);return(<tr key={i} style={{background:i%2===0?"#fff":"#fafafa"}}><td style={{...s.td,fontWeight:600,color:AZ,cursor:"pointer"}} onClick={()=>{setSelId(c.issuerId);setView("emisores");}}>{c.issuerName}</td><td style={{...s.td,color:AZ,fontWeight:600}}>{iss?.clasificacion}</td><td style={s.td}>{c.name}</td><td style={{...s.td,color:L.sub}}>{c.limite}</td><td style={{...s.td,fontWeight:600,color:col}}>{c.actual}</td><td style={s.td}><Pill status={c.status}/></td><td style={s.td}><button style={{...s.btn("#f0f2f5",AZ),fontSize:10}} onClick={()=>setEditIssuer(issuers.find(x=>x.id===c.issuerId))}>✏ Editar</button></td></tr>);})}</tbody></table></div>);})}</div>);
   return(<><style>{"*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',Arial,sans-serif}@keyframes spin{to{transform:rotate(360deg)}}"}</style>
     <div style={s.app}>
       <div style={s.sidebar}>
@@ -117,5 +227,6 @@ export default function App(){
       <div style={s.main}>{view==="dashboard"&&!selId&&<Dashboard/>}{view==="emisores"&&!selId&&<Emisores/>}{view==="emisores"&&selId&&<Detalle/>}{view==="alertas"&&!selId&&<Alertas/>}</div>
     </div>
     {uploadIssuer&&<UploadModal issuer={uploadIssuer} onClose={()=>setUploadIssuer(null)} onSuccess={()=>{setUploadIssuer(null);loadData();}}/>}
+    {editIssuer&&<EditModal issuer={editIssuer} onClose={()=>setEditIssuer(null)} onSuccess={()=>{setEditIssuer(null);loadData();}}/>}
   </>);
 }
