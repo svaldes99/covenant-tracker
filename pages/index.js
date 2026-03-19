@@ -9,6 +9,24 @@ const L = {
   sub: "#7a7f9a", border: "rgba(0,0,0,0.07)", bg: "#f0f2f5",
 };
 
+// Format number: thousands separator = ".", decimal = ","
+function fmtNum(n, suffix = "x") {
+  if (n === null || n === undefined || isNaN(n)) return null;
+  const fixed = Math.abs(n).toFixed(2);
+  const [intPart, decPart] = fixed.split(".");
+  const intFmt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return (n < 0 ? "-" : "") + intFmt + "," + decPart + suffix;
+}
+
+function parseNum(s) {
+  // Accept both "1.234,56" and "1234.56"
+  if (!s && s !== 0) return NaN;
+  const str = String(s);
+  // If has comma as decimal: "1.234,56" → remove dots, replace comma
+  if (str.includes(",")) return parseFloat(str.replace(/\./g, "").replace(",", "."));
+  return parseFloat(str);
+}
+
 function Dot({ status, size = 8 }) {
   const c = { ok: L.ok, warning: L.warn, breach: L.danger, na: "#ccc" };
   return <span style={{ display:"inline-block", width:size, height:size, borderRadius:"50%", background:c[status]||"#ccc", flexShrink:0 }} />;
@@ -20,46 +38,100 @@ function Pill({ status }) {
   return <span style={{ ...st[status]||st.na, borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:500 }}>{lb[status]||"S/D"}</span>;
 }
 
+function NewIssuerModal({ onClose, onSuccess }) {
+  const [name, setName] = useState("");
+  const [sector, setSector] = useState("");
+  const [clasificacion, setClasificacion] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSave() {
+    if (!name.trim()) return setError("El nombre es obligatorio");
+    setLoading(true); setError("");
+    try {
+      // Get current issuers and add new one
+      const listRes = await fetch("/api/issuers");
+      const list = await listRes.json();
+      const newIssuer = {
+        id: name.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") + "-" + Date.now(),
+        name: name.trim(),
+        sector: sector.trim() || "Sin sector",
+        clasificacion: clasificacion.trim() || "—",
+        fechaEEFF: "—",
+        covenants: []
+      };
+      const res = await fetch("/api/issuers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify([...list, newIssuer])
+      });
+      if (!res.ok) throw new Error("Error guardando");
+      onSuccess();
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  const btn = (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit" });
+  const inp = { border:`1px solid ${L.border}`, borderRadius:4, padding:"8px 10px", fontSize:13, fontFamily:"inherit", outline:"none", width:"100%" };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:440, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ padding:"20px 24px", borderBottom:`1px solid ${L.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontSize:15, fontWeight:600, color:AZ }}>Nuevo emisor</div>
+          <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), padding:"6px 12px" }}>✕</button>
+        </div>
+        <div style={{ padding:24, display:"flex", flexDirection:"column", gap:14 }}>
+          <div>
+            <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:5, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Nombre *</label>
+            <input style={inp} placeholder="ej: Empresas Copec S.A." value={name} onChange={e => setName(e.target.value)} autoFocus />
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:5, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Sector</label>
+            <input style={inp} placeholder="ej: Energía, Retail, Inmobiliario..." value={sector} onChange={e => setSector(e.target.value)} />
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:5, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Clasificación</label>
+            <input style={inp} placeholder="ej: AA, AA-, A+" value={clasificacion} onChange={e => setClasificacion(e.target.value)} />
+          </div>
+          {error && <p style={{ color:L.danger, fontSize:12, background:L.dangerBg, padding:"8px 12px", borderRadius:4, margin:0 }}>⚠ {error}</p>}
+          <div style={{ display:"flex", gap:8, marginTop:4 }}>
+            <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), flex:1 }}>Cancelar</button>
+            <button onClick={handleSave} disabled={loading} style={{ ...btn(), flex:2 }}>{loading ? "Guardando..." : "✓ Crear emisor"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EditModal({ issuer, onClose, onSuccess }) {
   const [rows, setRows] = useState(() =>
-    issuer.covenants.map(c => ({ ...c, actualVal: String(c.act ?? ""), _id: Math.random() }))
+    issuer.covenants.map(c => ({ ...c, actualVal: c.act != null ? String(c.act) : "", _id: Math.random() }))
   );
   const [fechaEEFF, setFechaEEFF] = useState(issuer.fechaEEFF || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   function addRow() {
-    setRows(prev => [...prev, {
-      _id: Math.random(), name: "", tipo: "flujo", op: ">=", lim: null, limite: "", actual: null, act: null, holgura: null, actualVal: ""
-    }]);
+    setRows(prev => [...prev, { _id: Math.random(), name: "", tipo: "flujo", op: ">=", lim: null, limite: "", actual: null, act: null, holgura: null, actualVal: "" }]);
   }
 
-  function removeRow(id) {
-    setRows(prev => prev.filter(r => r._id !== id));
-  }
-
-  function updateRow(id, field, value) {
-    setRows(prev => prev.map(r => r._id !== id ? r : { ...r, [field]: value }));
-  }
+  function removeRow(id) { setRows(prev => prev.filter(r => r._id !== id)); }
+  function updateRow(id, field, value) { setRows(prev => prev.map(r => r._id !== id ? r : { ...r, [field]: value })); }
 
   async function handleSave() {
     setLoading(true); setError("");
     try {
-      const covenants = rows
-        .filter(r => r.name.trim())
-        .map(r => {
-          const num = parseFloat(String(r.actualVal).replace(",", "."));
-          const lim = r.lim !== null && r.lim !== undefined ? r.lim : parseFloat(String(r.limite).replace(",", "."));
-          if (isNaN(num)) return { name:r.name, tipo:r.tipo, op:r.op, lim:isNaN(lim)?null:lim, limite:r.limite||"", actual:null, act:null, holgura:null, actualStr:null, holguraStr:null };
-          const holgura = r.op === "<=" ? lim - num : num - lim;
-          const fmt = n => isNaN(n) ? null : n.toFixed(2).replace(".", ",") + "x";
-          return { name:r.name, tipo:r.tipo, op:r.op, lim:isNaN(lim)?null:lim, limite:r.limite||String(lim), actual:fmt(num), act:num, holgura:isNaN(holgura)?null:holgura, actualStr:fmt(num), holguraStr:fmt(holgura) };
-        });
-      const res = await fetch("/api/issuers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ issuerId: issuer.id, covenants, fechaEEFF, replaceAll: true })
+      const covenants = rows.filter(r => r.name.trim()).map(r => {
+        const num = parseNum(r.actualVal);
+        const lim = r.lim !== null && r.lim !== undefined ? r.lim : parseNum(r.limite);
+        if (isNaN(num)) return { name:r.name, tipo:r.tipo, op:r.op, lim:isNaN(lim)?null:lim, limite:r.limite||"", actual:null, act:null, holgura:null, actualStr:null, holguraStr:null };
+        const holgura = r.op === "<=" ? lim - num : num - lim;
+        return { name:r.name, tipo:r.tipo, op:r.op, lim:isNaN(lim)?null:lim, limite:r.limite||fmtNum(lim,""), actual:fmtNum(num,""), act:num, holgura:isNaN(holgura)?null:holgura, actualStr:fmtNum(num), holguraStr:fmtNum(holgura) };
       });
+      const res = await fetch("/api/issuers", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ issuerId:issuer.id, covenants, fechaEEFF, replaceAll:true }) });
       if (!res.ok) throw new Error("Error guardando");
       onSuccess();
     } catch(e) { setError(e.message); }
@@ -72,12 +144,9 @@ function EditModal({ issuer, onClose, onSuccess }) {
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:780, maxHeight:"90vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:800, maxHeight:"90vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
         <div style={{ padding:"20px 24px", borderBottom:`1px solid ${L.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div>
-            <div style={{ fontSize:15, fontWeight:600, color:AZ }}>{issuer.name}</div>
-            <div style={{ fontSize:12, color:L.sub }}>Editar covenants — puedes agregar, modificar o eliminar</div>
-          </div>
+          <div><div style={{ fontSize:15, fontWeight:600, color:AZ }}>{issuer.name}</div><div style={{ fontSize:12, color:L.sub }}>Editar covenants — agregar, modificar o eliminar</div></div>
           <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), padding:"6px 12px" }}>✕</button>
         </div>
         <div style={{ padding:24 }}>
@@ -86,66 +155,32 @@ function EditModal({ issuer, onClose, onSuccess }) {
               <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:4, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Período EEFF</label>
               <input style={{ ...inp(160) }} placeholder="ej: dic-24" value={fechaEEFF} onChange={e => setFechaEEFF(e.target.value)} />
             </div>
-            <button onClick={addRow} style={{ ...btn("rgba(55,81,114,0.1)",AZ), fontSize:12 }}>＋ Agregar covenant</button>
+            <button onClick={addRow} style={{ ...btn("rgba(55,81,114,0.1)",AZ) }}>＋ Agregar covenant</button>
           </div>
-
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
-            <thead>
-              <tr>{["Nombre del covenant","Tipo","Op.","Límite","Valor actual","Holgura",""].map(h => (
-                <th key={h} style={{ textAlign:"left", padding:"7px 10px", background:AZ, color:"#fff", fontSize:10, fontWeight:500 }}>{h}</th>
-              ))}</tr>
-            </thead>
+            <thead><tr>{["Nombre","Tipo","Op.","Límite","Valor actual","Holgura",""].map(h => <th key={h} style={{ textAlign:"left", padding:"7px 10px", background:AZ, color:"#fff", fontSize:10, fontWeight:500 }}>{h}</th>)}</tr></thead>
             <tbody>
-              {rows.map((r) => {
-                const num = parseFloat(String(r.actualVal).replace(",", "."));
-                const lim = r.lim !== null && r.lim !== undefined ? r.lim : parseFloat(String(r.limite).replace(",", "."));
+              {rows.map(r => {
+                const num = parseNum(r.actualVal);
+                const lim = r.lim !== null && r.lim !== undefined ? r.lim : parseNum(r.limite);
                 const st = !isNaN(num) && !isNaN(lim) ? getStatus({...r, act:num, lim}) : "na";
                 const holgura = !isNaN(num) && !isNaN(lim) ? (r.op === "<=" ? lim - num : num - lim) : null;
                 const isNew = !issuer.covenants.find(c => c.name === r.name);
                 return (
                   <tr key={r._id} style={{ background: isNew ? "rgba(55,81,114,0.04)" : "transparent" }}>
-                    <td style={{ padding:"6px 8px", borderBottom:`1px solid ${L.border}` }}>
-                      <input style={{ ...inp(170), fontWeight: isNew ? 500 : "normal" }} placeholder="ej: DFN/EBITDA" value={r.name} onChange={e => updateRow(r._id, "name", e.target.value)} />
-                    </td>
-                    <td style={{ padding:"6px 8px", borderBottom:`1px solid ${L.border}` }}>
-                      <select style={{ ...inp(70) }} value={r.tipo} onChange={e => updateRow(r._id, "tipo", e.target.value)}>
-                        <option value="flujo">flujo</option>
-                        <option value="stock">stock</option>
-                      </select>
-                    </td>
-                    <td style={{ padding:"6px 8px", borderBottom:`1px solid ${L.border}` }}>
-                      <select style={{ ...inp(55) }} value={r.op} onChange={e => updateRow(r._id, "op", e.target.value)}>
-                        <option value="<=">≤</option>
-                        <option value=">=">≥</option>
-                      </select>
-                    </td>
-                    <td style={{ padding:"6px 8px", borderBottom:`1px solid ${L.border}` }}>
-                      <input style={inp(70)} placeholder="ej: 3.50" value={r.limite} onChange={e => { updateRow(r._id, "limite", e.target.value); updateRow(r._id, "lim", parseFloat(e.target.value.replace(",","."))||null); }} />
-                    </td>
-                    <td style={{ padding:"6px 8px", borderBottom:`1px solid ${L.border}` }}>
-                      <input style={{ ...inp(80), borderColor: st==="breach"?L.danger:st==="warning"?L.warn:L.border }}
-                        placeholder="ej: 2.50" value={r.actualVal} onChange={e => updateRow(r._id, "actualVal", e.target.value)} />
-                    </td>
-                    <td style={{ padding:"6px 8px", borderBottom:`1px solid ${L.border}`, whiteSpace:"nowrap" }}>
-                      {holgura !== null
-                        ? <span style={{ color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub, fontWeight:500 }}>{holgura.toFixed(2).replace(".",",")}x</span>
-                        : <span style={{ color:"#ccc" }}>—</span>}
-                    </td>
-                    <td style={{ padding:"6px 8px", borderBottom:`1px solid ${L.border}` }}>
-                      <button onClick={() => removeRow(r._id)} style={{ ...btn(L.dangerBg,"rgb(170,40,50)"), padding:"4px 8px", fontSize:11 }} title="Eliminar">✕</button>
-                    </td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><input style={{ ...inp(175) }} placeholder="ej: DFN/EBITDA" value={r.name} onChange={e => updateRow(r._id, "name", e.target.value)} /></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><select style={{ ...inp(68) }} value={r.tipo} onChange={e => updateRow(r._id, "tipo", e.target.value)}><option value="flujo">flujo</option><option value="stock">stock</option></select></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><select style={{ ...inp(52) }} value={r.op} onChange={e => updateRow(r._id, "op", e.target.value)}><option value="<=">≤</option><option value=">=">≥</option></select></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><input style={inp(72)} placeholder="ej: 3,50" value={r.limite} onChange={e => { updateRow(r._id, "limite", e.target.value); updateRow(r._id, "lim", parseNum(e.target.value)); }} /></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><input style={{ ...inp(82), borderColor: st==="breach"?L.danger:st==="warning"?L.warn:L.border }} placeholder="ej: 2,50" value={r.actualVal} onChange={e => updateRow(r._id, "actualVal", e.target.value)} /></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}`, whiteSpace:"nowrap" }}>{holgura !== null ? <span style={{ color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub, fontWeight:500 }}>{fmtNum(holgura)}</span> : <span style={{ color:"#ccc" }}>—</span>}</td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><button onClick={() => removeRow(r._id)} style={{ ...btn(L.dangerBg,"rgb(170,40,50)"), padding:"4px 8px", fontSize:11 }}>✕</button></td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-
-          {rows.length === 0 && (
-            <div style={{ textAlign:"center", padding:"20px 0", color:L.sub, fontSize:12 }}>
-              No hay covenants. Haz clic en "＋ Agregar covenant" para añadir uno.
-            </div>
-          )}
-
+          {rows.length === 0 && <div style={{ textAlign:"center", padding:"20px 0", color:L.sub, fontSize:12 }}>Sin covenants. Haz clic en "＋ Agregar covenant" para añadir.</div>}
           {error && <p style={{ color:L.danger, fontSize:12, marginTop:12, background:L.dangerBg, padding:"8px 12px", borderRadius:4 }}>⚠ {error}</p>}
           <div style={{ display:"flex", gap:8, marginTop:16 }}>
             <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), flex:1 }}>Cancelar</button>
@@ -240,6 +275,7 @@ export default function App() {
   const [selId, setSelId] = useState(null);
   const [uploadIssuer, setUploadIssuer] = useState(null);
   const [editIssuer, setEditIssuer] = useState(null);
+  const [newIssuerOpen, setNewIssuerOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterSector, setFilterSector] = useState("all");
@@ -280,8 +316,8 @@ export default function App() {
     btn: (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"7px 14px", cursor:"pointer", fontSize:12, fontFamily:"inherit", fontWeight:500 }),
   };
 
-  function Header({ title, sub }) {
-    return (<div style={{ marginBottom:24 }}><div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}><div><h1 style={{ fontSize:21, fontWeight:600, color:AZ, marginBottom:3 }}>{title}</h1>{sub && <p style={{ fontSize:12, color:L.sub }}>{sub}</p>}</div><div style={{ display:"flex", gap:8, alignItems:"center" }}><button style={s.btn("#f0f2f5","#666")} onClick={loadData}>↻ Actualizar</button>{lastUpdate && <span style={{ fontSize:10, color:L.sub }}>Actualizado {lastUpdate}</span>}</div></div><div style={{ height:2, background:AZ, marginTop:10, borderRadius:1 }} /></div>);
+  function Header({ title, sub, action }) {
+    return (<div style={{ marginBottom:24 }}><div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}><div><h1 style={{ fontSize:21, fontWeight:600, color:AZ, marginBottom:3 }}>{title}</h1>{sub && <p style={{ fontSize:12, color:L.sub }}>{sub}</p>}</div><div style={{ display:"flex", gap:8, alignItems:"center" }}>{action}{<button style={s.btn("#f0f2f5","#666")} onClick={loadData}>↻ Actualizar</button>}{lastUpdate && <span style={{ fontSize:10, color:L.sub }}>Actualizado {lastUpdate}</span>}</div></div><div style={{ height:2, background:AZ, marginTop:10, borderRadius:1 }} /></div>);
   }
 
   if (loading) return (<div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:L.bg, flexDirection:"column", gap:12 }}><div style={{ width:32, height:32, border:"3px solid rgba(55,81,114,0.2)", borderTopColor:AZ, borderRadius:"50%", animation:"spin 1s linear infinite" }} /><p style={{ color:AZ, fontWeight:500 }}>Cargando...</p><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>);
@@ -296,7 +332,9 @@ export default function App() {
       </div></div>);
   };
 
-  const Emisores = () => (<div><Header title="Emisores" sub="Haz clic en un emisor para ver detalles" />
+  const Emisores = () => (<div>
+    <Header title="Emisores" sub="Haz clic en un emisor para ver detalles"
+      action={<button style={s.btn()} onClick={() => setNewIssuerOpen(true)}>＋ Nuevo emisor</button>} />
     <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}><input style={{ ...s.inp, width:200 }} placeholder="Buscar emisor..." value={search} onChange={e=>setSearch(e.target.value)}/><select style={s.sel} value={filterSector} onChange={e=>setFilterSector(e.target.value)}><option value="all">Todos los sectores</option>{sectors.filter(x=>x!=="all").map(x=><option key={x} value={x}>{x}</option>)}</select><select style={s.sel} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Todos los estados</option><option value="ok">✓ Cumple</option><option value="warning">⚠ En riesgo</option><option value="breach">✗ Incumple</option></select></div>
     <div style={s.card}><table style={s.tbl}><thead><tr>{["","Emisor","Sector","Clasificación","EEFF","Cvts","Estado","Acciones"].map(h=><th key={h} style={s.th}>{h}</th>)}</tr></thead>
     <tbody>{filteredIssuers.map((iss,i)=>{const st=issuerStatus(iss);const bk={breach:iss.covenants.filter(c=>getStatus(c)==="breach").length,warning:iss.covenants.filter(c=>getStatus(c)==="warning").length,ok:iss.covenants.filter(c=>getStatus(c)==="ok").length};return(<tr key={iss.id} style={{ background:i%2===0?"#fff":"#fafafa", cursor:"pointer" }} onClick={()=>setSelId(iss.id)}><td style={{ ...s.td, width:14 }}><Dot status={st}/></td><td style={{ ...s.td, fontWeight:600, color:AZ }}>{iss.name}</td><td style={{ ...s.td, color:L.sub }}>{iss.sector}</td><td style={{ ...s.td, fontWeight:600, color:AZ }}>{iss.clasificacion}</td><td style={{ ...s.td, color:isStale(iss.fechaEEFF)?L.warn:L.sub }}>{iss.fechaEEFF}{isStale(iss.fechaEEFF)?" ⚠":""}</td><td style={s.td}>{iss.covenants.length}</td><td style={s.td}><div style={{ display:"flex", gap:4 }}>{bk.breach>0&&<span style={{ background:L.dangerBg,color:"rgb(170,40,50)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500 }}>✗ {bk.breach}</span>}{bk.warning>0&&<span style={{ background:L.warnBg,color:"rgb(150,110,20)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500 }}>⚠ {bk.warning}</span>}{bk.ok>0&&<span style={{ background:L.okBg,color:"rgb(40,120,70)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500 }}>✓ {bk.ok}</span>}</div></td><td style={s.td} onClick={e=>e.stopPropagation()}><div style={{ display:"flex", gap:4 }}><button style={{ ...s.btn("#f0f2f5",AZ), fontSize:11 }} onClick={()=>setUploadIssuer(iss)}>📄 PDF</button><button style={{ ...s.btn("rgba(55,81,114,0.1)",AZ), fontSize:11 }} onClick={()=>setEditIssuer(iss)}>✏ Manual</button></div></td></tr>);})}</tbody></table></div></div>);
@@ -322,5 +360,6 @@ export default function App() {
     </div>
     {uploadIssuer&&<UploadModal issuer={uploadIssuer} onClose={()=>setUploadIssuer(null)} onSuccess={()=>{setUploadIssuer(null);loadData();}}/>}
     {editIssuer&&<EditModal issuer={editIssuer} onClose={()=>setEditIssuer(null)} onSuccess={()=>{setEditIssuer(null);loadData();}}/>}
+    {newIssuerOpen&&<NewIssuerModal onClose={()=>setNewIssuerOpen(false)} onSuccess={()=>{setNewIssuerOpen(false);loadData();}}/>}
   </>);
 }
