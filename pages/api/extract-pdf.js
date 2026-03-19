@@ -4,7 +4,6 @@ import fs from "fs";
 
 export const config = { api: { bodyParser: false } };
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
 const MAX_B64_CHARS = 25 * 1024 * 1024;
 
 export default async function handler(req, res) {
@@ -20,32 +19,33 @@ export default async function handler(req, res) {
     try {
       const pdfBuffer = fs.readFileSync(file.filepath);
       let base64PDF = pdfBuffer.toString("base64");
-
       if (base64PDF.length > MAX_B64_CHARS) {
         base64PDF = base64PDF.substring(0, MAX_B64_CHARS);
       }
 
       const covenantList = covenants.map(c =>
-        `- "${c.name}" | tipo: ${c.tipo} | operador: ${c.op} | límite: ${c.lim} | actual actual: ${c.act}`
+        `- "${c.name}" | tipo: ${c.tipo} | operador: ${c.op} | límite: ${c.lim}`
       ).join("\n");
 
       const prompt = `Eres analista financiero experto en bonos corporativos chilenos.
 Se te entrega documentación financiera de la empresa "${issuerName}".
 
-Necesito que extraigas o calcules los valores ACTUALES de estos covenants financieros:
+Necesito extraer o calcular los valores ACTUALES de los siguientes covenants financieros de BONOS (no créditos bancarios ni líneas de crédito):
 ${covenantList}
 
 INSTRUCCIONES (en orden de prioridad):
-1. PRIMERO busca si el documento incluye una sección de "Covenants", "Restricciones financieras", "Financial covenants" o similar — si los valores están ahí directamente, úsalos.
-2. SEGUNDO si no están explícitos, calcula cada ratio usando los estados financieros:
-   - DFN (Deuda Financiera Neta) = Deuda financiera total - Caja y equivalentes
-   - EBITDA = Resultado operacional + Depreciación + Amortización
+1. PRIMERO busca en el documento secciones como "Covenants de bonos", "Restricciones financieras de bonos", "Financial covenants", "Resguardos financieros", o notas sobre bonos/obligaciones en circulación. Si encuentras los valores calculados ahí directamente, úsalos.
+2. SEGUNDO si no están explícitos, calcula cada ratio usando los estados financieros consolidados:
+   - DFN (Deuda Financiera Neta) = Pasivos financieros con costo (bonos + préstamos) - Efectivo y equivalentes
+   - EBITDA = Ganancia operacional + Depreciación y amortización (del período)
    - GFN (Gastos Financieros Netos) = Costos financieros - Ingresos financieros
-   - Patrimonio = Total patrimonio neto
-3. Para la holgura: si operador es "<=", holgura = límite - actual. Si ">=", holgura = actual - límite.
-4. Si no encuentras suficiente información para calcular un covenant, usa null.
+   - Patrimonio = Total patrimonio atribuible a controladores
+   - DF (Deuda Financiera) = Total pasivos financieros con costo
+3. IMPORTANTE: Estos son covenants de bonos emitidos en el mercado de capitales chileno. Ignora cualquier covenant de créditos bancarios o líneas de crédito que pueda mencionarse en el documento.
+4. Para la holgura: si operador es "<=", holgura = límite - actual. Si ">=", holgura = actual - límite.
+5. Si no encuentras suficiente información para calcular un covenant, usa null.
 
-Responde ÚNICAMENTE con este JSON válido (sin texto adicional antes ni después):
+Responde ÚNICAMENTE con este JSON válido (sin texto adicional):
 {
   "fechaEEFF": "mmm-aa",
   "covenants": [
@@ -59,11 +59,11 @@ Responde ÚNICAMENTE con este JSON válido (sin texto adicional antes ni despué
   ]
 }
 
-IMPORTANTE:
-- El campo "name" debe coincidir EXACTAMENTE con los nombres de la lista de arriba
+REGLAS:
+- El campo "name" debe coincidir EXACTAMENTE con los nombres de la lista
 - Usa punto decimal (.) para números, no coma
-- Para holgura negativa usa número negativo: -0.11 → "-0,11x"
-- Incluye TODOS los covenants de la lista, aunque sean null`;
+- Holgura negativa: -0.11 → "-0,11x"
+- Incluye TODOS los covenants de la lista aunque sean null`;
 
       const response = await client.messages.create({
         model: "claude-sonnet-4-20250514",
@@ -84,7 +84,7 @@ IMPORTANTE:
       try { fs.unlinkSync(file.filepath); } catch {}
       if (e.message?.includes("100 PDF pages") || e.message?.includes("too long") || e.message?.includes("tokens")) {
         return res.status(400).json({
-          error: "El PDF es demasiado extenso. Sube solo las páginas del balance general, estado de resultados y notas de deuda (máx ~80 páginas). Puedes dividirlo en ilovepdf.com."
+          error: "El PDF es demasiado extenso. Sube solo las páginas del balance general, estado de resultados y notas de deuda/bonos (máx ~80 páginas). Puedes dividirlo en ilovepdf.com."
         });
       }
       return res.status(500).json({ error: e.message });
