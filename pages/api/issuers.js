@@ -9,21 +9,12 @@ async function getRedis() {
       _client = new Redis(process.env.REDIS_URL);
     }
     return {
-      get: async (key) => {
-        const val = await _client.get(key);
-        return val ? JSON.parse(val) : null;
-      },
-      set: async (key, value) => {
-        await _client.set(key, JSON.stringify(value));
-      }
+      get: async (key) => { const val = await _client.get(key); return val ? JSON.parse(val) : null; },
+      set: async (key, value) => { await _client.set(key, JSON.stringify(value)); }
     };
   }
-  // In-memory fallback for local dev
   let store = null;
-  return {
-    get: async () => store,
-    set: async (_, v) => { store = v; }
-  };
+  return { get: async () => store, set: async (_, v) => { store = v; } };
 }
 
 export default async function handler(req, res) {
@@ -35,10 +26,15 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "POST") {
-    const { issuerId, covenants, fechaEEFF } = req.body;
+    const { issuerId, covenants, fechaEEFF, replaceAll } = req.body;
     let data = await db.get("issuers") || INITIAL_ISSUERS;
     data = data.map(iss => {
       if (iss.id !== issuerId) return iss;
+      if (replaceAll) {
+        // Replace entire covenant list (add/remove support)
+        return { ...iss, covenants, fechaEEFF: fechaEEFF || iss.fechaEEFF };
+      }
+      // Default: update values of existing covenants by name
       const updatedCovenants = iss.covenants.map(cov => {
         const extracted = covenants.find(e => e.name === cov.name);
         if (!extracted || extracted.actual === null) return cov;
