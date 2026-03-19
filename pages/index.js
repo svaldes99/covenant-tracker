@@ -195,70 +195,208 @@ function EditModal({ issuer, onClose, onSuccess }) {
 function UploadModal({ issuer, onClose, onSuccess }) {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(null); // raw extraction result
+  const [confirmed, setConfirmed] = useState(null); // covenants after user confirmation
+  const [extraRows, setExtraRows] = useState([]); // user-added covenants to calculate
+  const [calculating, setCalculating] = useState(false);
   const [error, setError] = useState("");
+  const [step, setStep] = useState("upload"); // upload | confirm | done
 
   async function handleExtract() {
     if (!file) return;
     setLoading(true); setError("");
     try {
       const fd = new FormData();
-      fd.append("pdf", file); fd.append("issuerName", issuer.name); fd.append("covenants", JSON.stringify(issuer.covenants));
+      fd.append("pdf", file);
+      fd.append("issuerName", issuer.name);
+      fd.append("covenants", JSON.stringify(issuer.covenants));
       const res = await fetch("/api/extract-pdf", { method:"POST", body:fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setResult(data);
+      setStep("confirm");
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
   }
 
+  async function handleCalculateExtra() {
+    if (!file || extraRows.filter(r => r.name.trim()).length === 0) return;
+    setCalculating(true); setError("");
+    try {
+      const fd = new FormData();
+      fd.append("pdf", file);
+      fd.append("issuerName", issuer.name);
+      fd.append("covenants", JSON.stringify([]));
+      fd.append("calculateExtra", JSON.stringify(extraRows.filter(r => r.name.trim()).map(r => ({
+        name: r.name, tipo: r.tipo || "flujo", op: r.op || ">=", lim: parseNum(r.limite)
+      }))));
+      const res = await fetch("/api/extract-pdf", { method:"POST", body:fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      // Merge calculated extras into result
+      const calcMap = {};
+      (data.covenants || []).forEach(c => { calcMap[c.name] = c; });
+      setExtraRows(prev => prev.map(r => {
+        const calc = calcMap[r.name.trim()];
+        if (calc) return { ...r, actual: calc.actual, actualStr: calc.actualStr, holgura: calc.holgura, holguraStr: calc.holguraStr, encontrado: calc.encontrado, nota: calc.nota };
+        return r;
+      }));
+    } catch(e) { setError(e.message); }
+    finally { setCalculating(false); }
+  }
+
   async function handleSave() {
-    if (!result) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/issuers", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ issuerId:issuer.id, covenants:result.covenants, fechaEEFF:result.fechaEEFF }) });
+      // Merge confirmed result covenants with any extras
+      const baseCovs = (result?.covenants || []).filter(c => c.actual !== null);
+      const extraCovs = extraRows.filter(r => r.name.trim()).map(r => ({
+        name: r.name.trim(),
+        tipo: r.tipo || "flujo",
+        op: r.op || ">=",
+        lim: parseNum(r.limite),
+        limite: r.limite || "",
+        actual: r.actualStr || null,
+        act: r.actual || null,
+        holgura: r.holgura || null,
+        actualStr: r.actualStr || null,
+        holguraStr: r.holguraStr || null
+      }));
+
+      // Update existing covenants with found values, add new ones from extras
+      const existingNames = issuer.covenants.map(c => c.name);
+      const updatedExisting = issuer.covenants.map(cov => {
+        const found = baseCovs.find(c => c.name === cov.name);
+        if (found) return { ...cov, actual: found.actualStr, act: found.actual, holgura: found.holguraStr };
+        return cov;
+      });
+      // Add extras that are truly new
+      const newExtras = extraCovs.filter(c => !existingNames.includes(c.name));
+      const allCovenants = [...updatedExisting, ...newExtras];
+
+      const res = await fetch("/api/issuers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issuerId: issuer.id, covenants: allCovenants, fechaEEFF: result?.fechaEEFF, replaceAll: true })
+      });
       if (!res.ok) throw new Error("Error guardando");
       onSuccess();
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
   }
 
+  function addExtraRow() {
+    setExtraRows(prev => [...prev, { _id: Math.random(), name: "", tipo: "flujo", op: ">=", limite: "", actual: null, actualStr: null, holgura: null, holguraStr: null }]);
+  }
+  function removeExtra(id) { setExtraRows(prev => prev.filter(r => r._id !== id)); }
+  function updateExtra(id, field, val) { setExtraRows(prev => prev.map(r => r._id !== id ? r : { ...r, [field]: val })); }
+
   const btn = (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit" });
+  const smallInp = (w) => ({ border:`1px solid ${L.border}`, borderRadius:4, padding:"4px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:w||"100%" });
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:540, maxHeight:"90vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth: step==="confirm" ? 700 : 540, maxHeight:"90vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
         <div style={{ padding:"20px 24px", borderBottom:`1px solid ${L.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div><div style={{ fontSize:15, fontWeight:600, color:AZ }}>{issuer.name}</div><div style={{ fontSize:12, color:L.sub }}>Actualizar desde EEFF</div></div>
+          <div>
+            <div style={{ fontSize:15, fontWeight:600, color:AZ }}>{issuer.name}</div>
+            <div style={{ fontSize:12, color:L.sub }}>
+              {step==="upload" ? "Subir EEFF para extracción automática" : "Confirmar covenants encontrados"}
+            </div>
+          </div>
           <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), padding:"6px 12px" }}>✕</button>
         </div>
+
         <div style={{ padding:24 }}>
-          {!result ? (
+          {step === "upload" && (
             <>
               <div style={{ border:`2px dashed ${L.border}`, borderRadius:6, padding:32, textAlign:"center", marginBottom:16, background:file?"rgba(55,81,114,0.03)":"#fafafa" }}>
                 <div style={{ fontSize:28, marginBottom:8 }}>📄</div>
                 <p style={{ color:AZ, fontWeight:500, marginBottom:8 }}>{file ? file.name : "Sube el PDF del EEFF"}</p>
-                <p style={{ color:L.sub, fontSize:12, marginBottom:16 }}>Balance general o estado de resultados (máx ~80 págs)</p>
+                <p style={{ color:L.sub, fontSize:12, marginBottom:16 }}>Claude buscará los ratios en las notas de bonos/restricciones financieras (máx ~80 págs)</p>
                 <input type="file" accept=".pdf" onChange={e => setFile(e.target.files[0])} style={{ display:"none" }} id="pdf-input" />
-                <label htmlFor="pdf-input" style={{ ...btn("#f0f0f0",AZ), cursor:"pointer" }}>{file ? "Cambiar" : "Seleccionar PDF"}</label>
+                <label htmlFor="pdf-input" style={{ ...btn("#f0f0f0",AZ), cursor:"pointer" }}>{file ? "Cambiar archivo" : "Seleccionar PDF"}</label>
               </div>
               {error && <p style={{ color:L.danger, fontSize:12, marginBottom:12, background:L.dangerBg, padding:"8px 12px", borderRadius:4 }}>⚠ {error}</p>}
               <button onClick={handleExtract} disabled={!file||loading} style={{ ...btn(file&&!loading?AZ:"#ccc"), width:"100%" }}>
-                {loading ? "⏳ Analizando con Claude AI..." : "✨ Extraer covenants con IA"}
+                {loading ? "⏳ Analizando EEFF con Claude AI..." : "✨ Extraer covenants con IA"}
               </button>
             </>
-          ) : (
+          )}
+
+          {step === "confirm" && result && (
             <>
-              <div style={{ background:"rgba(101,169,124,0.08)", border:`1px solid ${L.ok}`, borderRadius:6, padding:12, marginBottom:16, fontSize:12 }}>✓ Período: <strong>{result.fechaEEFF}</strong></div>
+              {/* Summary banner */}
+              <div style={{ background:"rgba(55,81,114,0.06)", border:`1px solid rgba(55,81,114,0.2)`, borderRadius:6, padding:"10px 14px", marginBottom:16, fontSize:12 }}>
+                <strong>Período detectado: {result.fechaEEFF}</strong>
+                {result.resumen && <div style={{ color:L.sub, marginTop:4 }}>{result.resumen}</div>}
+              </div>
+
+              {/* Found covenants */}
+              <p style={{ fontSize:11, fontWeight:600, color:AZ, marginBottom:8, textTransform:"uppercase", letterSpacing:0.5 }}>Covenants encontrados en el PDF</p>
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, marginBottom:16 }}>
-                <thead><tr>{["Covenant","Límite","Nuevo valor","Estado"].map(h => <th key={h} style={{ textAlign:"left", padding:"7px 10px", background:AZ, color:"#fff", fontSize:10, fontWeight:500 }}>{h}</th>)}</tr></thead>
-                <tbody>{issuer.covenants.map((cov, i) => { const ex = result.covenants.find(e => e.name===cov.name); const st = ex?.actual!=null?getStatus({...cov,act:ex.actual}):"na"; return (<tr key={i} style={{ background:i%2===0?"#fff":"#fafafa" }}><td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}` }}>{cov.name}</td><td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, color:L.sub }}>{cov.limite}</td><td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, fontWeight:600, color:st==="breach"?L.danger:st==="warning"?L.warn:"#2d3142" }}>{ex?.actualStr||"—"}</td><td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}` }}><Pill status={st}/></td></tr>); })}</tbody>
+                <thead><tr>{["Covenant","Límite","Valor","Estado","Fuente"].map(h => <th key={h} style={{ textAlign:"left", padding:"7px 10px", background:AZ, color:"#fff", fontSize:10, fontWeight:500 }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {issuer.covenants.map((cov, i) => {
+                    const ex = result.covenants?.find(e => e.name === cov.name);
+                    const st = ex?.actual != null ? getStatus({...cov, act:ex.actual}) : "na";
+                    const found = ex?.encontrado !== false && ex?.actual != null;
+                    return (
+                      <tr key={i} style={{ background: !found ? "rgba(255,200,0,0.05)" : i%2===0?"#fff":"#fafafa" }}>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, fontWeight:500 }}>{cov.name}</td>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, color:L.sub }}>{cov.limite}</td>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, fontWeight:600, color:st==="breach"?L.danger:st==="warning"?L.warn:"#2d3142" }}>
+                          {ex?.actualStr || <span style={{ color:"#ccc" }}>No encontrado</span>}
+                        </td>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}` }}><Pill status={st}/></td>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, color:L.sub, fontSize:11 }}>{ex?.nota || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
               </table>
-              {error && <p style={{ color:L.danger, fontSize:12, marginBottom:12 }}>⚠ {error}</p>}
-              <div style={{ display:"flex", gap:8 }}>
-                <button onClick={() => { setResult(null); setFile(null); }} style={{ ...btn("#f0f0f0","#666"), flex:1 }}>← Volver</button>
-                <button onClick={handleSave} disabled={loading} style={{ ...btn(), flex:2 }}>{loading?"Guardando...":"✓ Guardar"}</button>
+
+              {/* Extra covenants section */}
+              <div style={{ borderTop:`1px solid ${L.border}`, paddingTop:16, marginTop:4 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                  <p style={{ fontSize:11, fontWeight:600, color:AZ, textTransform:"uppercase", letterSpacing:0.5 }}>
+                    ¿Falta algún covenant? Agrégalo aquí
+                  </p>
+                  <button onClick={addExtraRow} style={{ ...btn("rgba(55,81,114,0.1)",AZ), fontSize:11, padding:"5px 12px" }}>＋ Agregar</button>
+                </div>
+
+                {extraRows.length > 0 && (
+                  <>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, marginBottom:10 }}>
+                      <thead><tr>{["Nombre","Tipo","Op.","Límite","Valor calculado",""].map(h => <th key={h} style={{ textAlign:"left", padding:"5px 8px", background:"#f5f6fa", color:AZ, fontSize:10, fontWeight:600 }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {extraRows.map(r => (
+                          <tr key={r._id}>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><input style={smallInp(155)} placeholder="ej: DFN/EBITDA" value={r.name} onChange={e => updateExtra(r._id,"name",e.target.value)} /></td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><select style={smallInp(65)} value={r.tipo} onChange={e => updateExtra(r._id,"tipo",e.target.value)}><option value="flujo">flujo</option><option value="stock">stock</option></select></td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><select style={smallInp(50)} value={r.op} onChange={e => updateExtra(r._id,"op",e.target.value)}><option value="<=">≤</option><option value=">=">≥</option></select></td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><input style={smallInp(70)} placeholder="ej: 3,50" value={r.limite} onChange={e => updateExtra(r._id,"limite",e.target.value)} /></td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}`, fontWeight:500, color: r.actual != null ? (r.holgura < 0 ? L.danger : L.sub) : "#ccc" }}>
+                              {r.actualStr || <span style={{ color:"#ccc", fontSize:10 }}>pendiente</span>}
+                            </td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><button onClick={() => removeExtra(r._id)} style={{ ...btn(L.dangerBg,"rgb(170,40,50)"), padding:"3px 7px", fontSize:10 }}>✕</button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <button onClick={handleCalculateExtra} disabled={calculating || !file} style={{ ...btn("rgba(55,81,114,0.1)",AZ), fontSize:12, marginBottom:12 }}>
+                      {calculating ? "⏳ Calculando..." : "⚡ Calcular desde el PDF"}
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {error && <p style={{ color:L.danger, fontSize:12, marginTop:8, background:L.dangerBg, padding:"8px 12px", borderRadius:4 }}>⚠ {error}</p>}
+
+              <div style={{ display:"flex", gap:8, marginTop:16 }}>
+                <button onClick={() => { setStep("upload"); setResult(null); setExtraRows([]); }} style={{ ...btn("#f0f0f0","#666"), flex:1 }}>← Volver</button>
+                <button onClick={handleSave} disabled={loading} style={{ ...btn(), flex:2 }}>{loading ? "Guardando..." : "✓ Confirmar y guardar"}</button>
               </div>
             </>
           )}
@@ -267,6 +405,7 @@ function UploadModal({ issuer, onClose, onSuccess }) {
     </div>
   );
 }
+
 
 export default function App() {
   const [issuers, setIssuers] = useState([]);
