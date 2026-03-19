@@ -160,10 +160,9 @@ function CovenantChart({ history, covenantName, issuer }) {
   );
 }
 
-// Excel export using SheetJS (loaded from CDN)
+// Excel export using SheetJS (installed package, client-side only)
 async function exportToExcel(issuer, history) {
-  // Dynamically load xlsx
-  const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+  const XLSX = await import("xlsx");
 
   const wb = XLSX.utils.book_new();
 
