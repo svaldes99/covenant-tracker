@@ -333,6 +333,465 @@ function UploadModal({ issuer, onClose, onSuccess }) {
                 {result.resumen && <div style={{ color:L.sub, marginTop:4 }}>{result.resumen}</div>}
               </div>
 
+              {/* Mismatch warning: covenants found with different names */}
+              {(() => {
+                const savedNames = issuer.covenants.map(c => c.name);
+                const foundNames = (result.covenants || []).filter(c => c.encontrado !== false && c.actual != null).map(c => c.name);
+                const newNames = foundNames.filter(n => !savedNames.includes(n));
+                if (newNames.length === 0) return null;
+                return (
+                  <div style={{ background:"rgba(214,158,46,0.08)", border:`1px solid ${L.warn}`, borderRadius:6, padding:"12px 14px", marginBottom:16, fontSize:12 }}>
+                    <div style={{ fontWeight:600, color:"rgb(150,110,20)", marginBottom:6 }}>
+                      ⚠ Claude encontró covenants con nombres distintos a los guardados
+                    </div>
+                    <div style={{ color:L.sub, marginBottom:10 }}>
+                      Los siguientes covenants fueron encontrados en el PDF pero no coinciden exactamente con los nombres guardados:
+                      <ul style={{ margin:"6px 0 0 16px", padding:0 }}>
+                        {newNames.map(n => <li key={n} style={{ marginBottom:2 }}><strong>{n}</strong></li>)}
+                      </ul>
+                    </div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button
+                        onClick={() => {
+                          // Replace issuer covenants structure with found ones
+                          const merged = (result.covenants || []).filter(c => c.actual != null).map(c => ({
+                            name: c.name,
+                            tipo: issuer.covenants.find(x => x.name === c.name)?.tipo || "flujo",
+                            op: issuer.covenants.find(x => x.name === c.name)?.op || ">=",
+                            lim: issuer.covenants.find(x => x.name === c.name)?.lim || null,
+                            limite: issuer.covenants.find(x => x.name === c.name)?.limite || "",
+                            actual: c.actualStr,
+                            act: c.actual,
+                            holgura: c.holguraStr,
+                            actualStr: c.actualStr,
+                            holguraStr: c.holguraStr,
+                            encontrado: true
+                          }));
+                          // Update issuer in-place for this modal session
+                          issuer._overrideCovenants = merged;
+                          // Force re-render by updating result
+                          setResult(prev => ({ ...prev, _accepted: Date.now() }));
+                        }}
+                        style={{ background:AZ, color:"#fff", border:"none", borderRadius:4, padding:"6px 14px", cursor:"pointer", fontSize:12, fontWeight:500 }}
+                      >
+                        ✓ Sí, usar los nombres encontrados
+                      </button>
+                      <button
+                        onClick={() => setResult(prev => ({ ...prev, _dismissed: true }))}
+                        style={{ background:"#f0f0f0", color:"#666", border:"none", borderRadius:4, padding:"6px 14px", cursor:"pointer", fontSize:12 }}
+                      >
+                        Mantener nombres actuales
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Covenant table */}
+              <p style={{ fontSize:11, fontWeight:600, color:AZ, marginBottom:8, textTransform:"uppercase", letterSpacing:0.5 }}>Covenants encontrados en el PDF</p>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, marginBottom:16 }}>
+                <thead><tr>{["Covenant","Límite","Valor","Estado","Fuente"].map(h => <th key={h} style={{ textAlign:"left", padding:"7px 10px", background:AZ, color:"#fff", fontSize:10, fontWeight:500 }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {(issuer._overrideCovenants || issuer.covenants).map((cov, i) => {
+                    const ex = (issuer._overrideCovenants)
+                      ? cov  // already merged
+                      : result.covenants?.find(e => e.name === cov.name);
+                    const st = ex?.actual != null || ex?.act != null
+                      ? getStatus({...cov, act: ex.act ?? ex.actual})
+                      : "na";
+                    const found = ex?.encontrado !== false && (ex?.actual != null || ex?.act != null);
+                    return (
+                      <tr key={i} style={{ background: !found ? "rgba(255,200,0,0.04)" : i%2===0?"#fff":"#fafafa" }}>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, fontWeight:500 }}>{cov.name}</td>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, color:L.sub }}>{cov.limite}</td>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, fontWeight:600, color:st==="breach"?L.danger:st==="warning"?L.warn:"#2d3142" }}>
+                          {ex?.actualStr || <span style={{ color:"#ccc" }}>No encontrado</span>}
+                        </td>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}` }}><Pill status={st}/></td>
+                        <td style={{ padding:"7px 10px", borderBottom:`1px solid ${L.border}`, color:L.sub, fontSize:11 }}>
+                          {ex?.nota || (found ? "—" : <span style={{ color:L.warn }}>Sin datos</span>)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/* Extra covenants section */}
+              <div style={{ borderTop:`1px solid ${L.border}`, paddingTop:16, marginTop:4 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                  <p style={{ fontSize:11, fontWeight:600, color:AZ, textTransform:"uppercase", letterSpacing:0.5 }}>
+                    ¿Falta algún covenant? Agrégalo aquí
+                  </p>
+                  <button onClick={addExtraRow} style={{ background:"rgba(55,81,114,0.1)", color:AZ, border:"none", borderRadius:4, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:500 }}>＋ Agregar</button>
+                </div>
+                {extraRows.length > 0 && (
+                  <>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, marginBottom:10 }}>
+                      <thead><tr>{["Nombre","Tipo","Op.","Límite","Valor calculado",""].map(h => <th key={h} style={{ textAlign:"left", padding:"5px 8px", background:"#f5f6fa", color:AZ, fontSize:10, fontWeight:600 }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {extraRows.map(r => (
+                          <tr key={r._id}>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><input style={{ border:`1px solid ${L.border}`, borderRadius:4, padding:"4px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:155 }} placeholder="ej: DFN/EBITDA" value={r.name} onChange={e => updateExtra(r._id,"name",e.target.value)} /></td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><select style={{ border:`1px solid ${L.border}`, borderRadius:4, padding:"4px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:65 }} value={r.tipo} onChange={e => updateExtra(r._id,"tipo",e.target.value)}><option value="flujo">flujo</option><option value="stock">stock</option></select></td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><select style={{ border:`1px solid ${L.border}`, borderRadius:4, padding:"4px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:50 }} value={r.op} onChange={e => updateExtra(r._id,"op",e.target.value)}><option value="<=">≤</option><option value=">=">≥</option></select></td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><input style={{ border:`1px solid ${L.border}`, borderRadius:4, padding:"4px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:70 }} placeholder="ej: 3,50" value={r.limite} onChange={e => updateExtra(r._id,"limite",e.target.value)} /></td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}`, fontWeight:500, color: r.actual != null ? L.sub : "#ccc" }}>
+                              {r.actualStr || <span style={{ fontSize:10, color:"#ccc" }}>pendiente</span>}
+                            </td>
+                            <td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><button onClick={() => removeExtra(r._id)} style={{ background:"rgba(210,70,80,0.1)", color:"rgb(170,40,50)", border:"none", borderRadius:4, padding:"3px 7px", cursor:"pointer", fontSize:10 }}>✕</button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <button onClick={handleCalculateExtra} disabled={calculating || !file} style={{ background:"rgba(55,81,114,0.1)", color:AZ, border:"none", borderRadius:4, padding:"6px 14px", cursor:"pointer", fontSize:12, fontWeight:500, marginBottom:12 }}>
+                      {calculating ? "⏳ Calculando..." : "⚡ Calcular desde el PDF"}
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {error && <p style={{ color:L.danger, fontSize:12, marginTop:8, background:L.dangerBg, padding:"8px 12px", borderRadius:4 }}>⚠ {error}</p>}
+              <div style={{ display:"flex", gap:8, marginTop:16 }}>
+                <button onClick={() => { setStep("upload"); setResult(null); setExtraRows([]); issuer._overrideCovenants = null; }} style={{ background:"#f0f0f0", color:"#666", border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit", flex:1 }}>← Volver</button>
+                <button onClick={handleSave} disabled={loading} style={{ background:AZ, color:"#fff", border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit", flex:2 }}>{loading ? "Guardando..." : "✓ Confirmar y guardar"}</button>
+              </div>
+            </>
+          )}import { useState, useEffect, useMemo } from "react";
+import { getStatus, issuerStatus, isStale } from "../lib/data";
+
+const AZ = "rgb(55,81,114)";
+const L = {
+  ok: "rgb(101,169,124)", okBg: "rgba(101,169,124,0.12)",
+  warn: "rgb(214,158,46)", warnBg: "rgba(214,158,46,0.12)",
+  danger: "rgb(210,70,80)", dangerBg: "rgba(210,70,80,0.1)",
+  sub: "#7a7f9a", border: "rgba(0,0,0,0.07)", bg: "#f0f2f5",
+};
+
+// Format number: thousands separator = ".", decimal = ","
+function fmtNum(n, suffix = "x") {
+  if (n === null || n === undefined || isNaN(n)) return null;
+  const fixed = Math.abs(n).toFixed(2);
+  const [intPart, decPart] = fixed.split(".");
+  const intFmt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return (n < 0 ? "-" : "") + intFmt + "," + decPart + suffix;
+}
+
+function parseNum(s) {
+  // Accept both "1.234,56" and "1234.56"
+  if (!s && s !== 0) return NaN;
+  const str = String(s);
+  // If has comma as decimal: "1.234,56" → remove dots, replace comma
+  if (str.includes(",")) return parseFloat(str.replace(/\./g, "").replace(",", "."));
+  return parseFloat(str);
+}
+
+function Dot({ status, size = 8 }) {
+  const c = { ok: L.ok, warning: L.warn, breach: L.danger, na: "#ccc" };
+  return <span style={{ display:"inline-block", width:size, height:size, borderRadius:"50%", background:c[status]||"#ccc", flexShrink:0 }} />;
+}
+
+function Pill({ status }) {
+  const st = { ok:{background:L.okBg,color:"rgb(40,120,70)"}, warning:{background:L.warnBg,color:"rgb(150,110,20)"}, breach:{background:L.dangerBg,color:"rgb(170,40,50)"}, na:{background:"#f0f0f0",color:L.sub} };
+  const lb = { ok:"Cumple", warning:"En riesgo", breach:"Incumple", na:"S/D" };
+  return <span style={{ ...st[status]||st.na, borderRadius:4, padding:"2px 8px", fontSize:11, fontWeight:500 }}>{lb[status]||"S/D"}</span>;
+}
+
+function NewIssuerModal({ onClose, onSuccess }) {
+  const [name, setName] = useState("");
+  const [sector, setSector] = useState("");
+  const [clasificacion, setClasificacion] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSave() {
+    if (!name.trim()) return setError("El nombre es obligatorio");
+    setLoading(true); setError("");
+    try {
+      // Get current issuers and add new one
+      const listRes = await fetch("/api/issuers");
+      const list = await listRes.json();
+      const newIssuer = {
+        id: name.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") + "-" + Date.now(),
+        name: name.trim(),
+        sector: sector.trim() || "Sin sector",
+        clasificacion: clasificacion.trim() || "—",
+        fechaEEFF: "—",
+        covenants: []
+      };
+      const res = await fetch("/api/issuers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify([...list, newIssuer])
+      });
+      if (!res.ok) throw new Error("Error guardando");
+      onSuccess();
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  const btn = (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit" });
+  const inp = { border:`1px solid ${L.border}`, borderRadius:4, padding:"8px 10px", fontSize:13, fontFamily:"inherit", outline:"none", width:"100%" };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:440, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ padding:"20px 24px", borderBottom:`1px solid ${L.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontSize:15, fontWeight:600, color:AZ }}>Nuevo emisor</div>
+          <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), padding:"6px 12px" }}>✕</button>
+        </div>
+        <div style={{ padding:24, display:"flex", flexDirection:"column", gap:14 }}>
+          <div>
+            <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:5, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Nombre *</label>
+            <input style={inp} placeholder="ej: Empresas Copec S.A." value={name} onChange={e => setName(e.target.value)} autoFocus />
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:5, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Sector</label>
+            <input style={inp} placeholder="ej: Energía, Retail, Inmobiliario..." value={sector} onChange={e => setSector(e.target.value)} />
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:5, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Clasificación</label>
+            <input style={inp} placeholder="ej: AA, AA-, A+" value={clasificacion} onChange={e => setClasificacion(e.target.value)} />
+          </div>
+          {error && <p style={{ color:L.danger, fontSize:12, background:L.dangerBg, padding:"8px 12px", borderRadius:4, margin:0 }}>⚠ {error}</p>}
+          <div style={{ display:"flex", gap:8, marginTop:4 }}>
+            <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), flex:1 }}>Cancelar</button>
+            <button onClick={handleSave} disabled={loading} style={{ ...btn(), flex:2 }}>{loading ? "Guardando..." : "✓ Crear emisor"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditModal({ issuer, onClose, onSuccess }) {
+  const [rows, setRows] = useState(() =>
+    issuer.covenants.map(c => ({ ...c, actualVal: c.act != null ? String(c.act) : "", _id: Math.random() }))
+  );
+  const [fechaEEFF, setFechaEEFF] = useState(issuer.fechaEEFF || "");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  function addRow() {
+    setRows(prev => [...prev, { _id: Math.random(), name: "", tipo: "flujo", op: ">=", lim: null, limite: "", actual: null, act: null, holgura: null, actualVal: "" }]);
+  }
+
+  function removeRow(id) { setRows(prev => prev.filter(r => r._id !== id)); }
+  function updateRow(id, field, value) { setRows(prev => prev.map(r => r._id !== id ? r : { ...r, [field]: value })); }
+
+  async function handleSave() {
+    setLoading(true); setError("");
+    try {
+      const covenants = rows.filter(r => r.name.trim()).map(r => {
+        const num = parseNum(r.actualVal);
+        const lim = r.lim !== null && r.lim !== undefined ? r.lim : parseNum(r.limite);
+        if (isNaN(num)) return { name:r.name, tipo:r.tipo, op:r.op, lim:isNaN(lim)?null:lim, limite:r.limite||"", actual:null, act:null, holgura:null, actualStr:null, holguraStr:null };
+        const holgura = r.op === "<=" ? lim - num : num - lim;
+        return { name:r.name, tipo:r.tipo, op:r.op, lim:isNaN(lim)?null:lim, limite:r.limite||fmtNum(lim,""), actual:fmtNum(num,""), act:num, holgura:isNaN(holgura)?null:holgura, actualStr:fmtNum(num), holguraStr:fmtNum(holgura) };
+      });
+      const res = await fetch("/api/issuers", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ issuerId:issuer.id, covenants, fechaEEFF, replaceAll:true }) });
+      if (!res.ok) throw new Error("Error guardando");
+      onSuccess();
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  const btn = (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"7px 14px", cursor:"pointer", fontSize:12, fontWeight:500, fontFamily:"inherit" });
+  const inp = (w) => ({ border:`1px solid ${L.border}`, borderRadius:4, padding:"5px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:w||"100%" });
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:800, maxHeight:"90vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ padding:"20px 24px", borderBottom:`1px solid ${L.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div><div style={{ fontSize:15, fontWeight:600, color:AZ }}>{issuer.name}</div><div style={{ fontSize:12, color:L.sub }}>Editar covenants — agregar, modificar o eliminar</div></div>
+          <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), padding:"6px 12px" }}>✕</button>
+        </div>
+        <div style={{ padding:24 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+            <div>
+              <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:4, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Período EEFF</label>
+              <input style={{ ...inp(160) }} placeholder="ej: dic-24" value={fechaEEFF} onChange={e => setFechaEEFF(e.target.value)} />
+            </div>
+            <button onClick={addRow} style={{ ...btn("rgba(55,81,114,0.1)",AZ) }}>＋ Agregar covenant</button>
+          </div>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+            <thead><tr>{["Nombre","Tipo","Op.","Límite","Valor actual","Holgura",""].map(h => <th key={h} style={{ textAlign:"left", padding:"7px 10px", background:AZ, color:"#fff", fontSize:10, fontWeight:500 }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map(r => {
+                const num = parseNum(r.actualVal);
+                const lim = r.lim !== null && r.lim !== undefined ? r.lim : parseNum(r.limite);
+                const st = !isNaN(num) && !isNaN(lim) ? getStatus({...r, act:num, lim}) : "na";
+                const holgura = !isNaN(num) && !isNaN(lim) ? (r.op === "<=" ? lim - num : num - lim) : null;
+                const isNew = !issuer.covenants.find(c => c.name === r.name);
+                return (
+                  <tr key={r._id} style={{ background: isNew ? "rgba(55,81,114,0.04)" : "transparent" }}>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><input style={{ ...inp(175) }} placeholder="ej: DFN/EBITDA" value={r.name} onChange={e => updateRow(r._id, "name", e.target.value)} /></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><select style={{ ...inp(68) }} value={r.tipo} onChange={e => updateRow(r._id, "tipo", e.target.value)}><option value="flujo">flujo</option><option value="stock">stock</option></select></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><select style={{ ...inp(52) }} value={r.op} onChange={e => updateRow(r._id, "op", e.target.value)}><option value="<=">≤</option><option value=">=">≥</option></select></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><input style={inp(72)} placeholder="ej: 3,50" value={r.limite} onChange={e => { updateRow(r._id, "limite", e.target.value); updateRow(r._id, "lim", parseNum(e.target.value)); }} /></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><input style={{ ...inp(82), borderColor: st==="breach"?L.danger:st==="warning"?L.warn:L.border }} placeholder="ej: 2,50" value={r.actualVal} onChange={e => updateRow(r._id, "actualVal", e.target.value)} /></td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}`, whiteSpace:"nowrap" }}>{holgura !== null ? <span style={{ color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub, fontWeight:500 }}>{fmtNum(holgura)}</span> : <span style={{ color:"#ccc" }}>—</span>}</td>
+                    <td style={{ padding:"5px 6px", borderBottom:`1px solid ${L.border}` }}><button onClick={() => removeRow(r._id)} style={{ ...btn(L.dangerBg,"rgb(170,40,50)"), padding:"4px 8px", fontSize:11 }}>✕</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {rows.length === 0 && <div style={{ textAlign:"center", padding:"20px 0", color:L.sub, fontSize:12 }}>Sin covenants. Haz clic en "＋ Agregar covenant" para añadir.</div>}
+          {error && <p style={{ color:L.danger, fontSize:12, marginTop:12, background:L.dangerBg, padding:"8px 12px", borderRadius:4 }}>⚠ {error}</p>}
+          <div style={{ display:"flex", gap:8, marginTop:16 }}>
+            <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), flex:1 }}>Cancelar</button>
+            <button onClick={handleSave} disabled={loading} style={{ ...btn(), flex:2 }}>{loading ? "Guardando..." : "✓ Guardar cambios"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UploadModal({ issuer, onClose, onSuccess }) {
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null); // raw extraction result
+  const [confirmed, setConfirmed] = useState(null); // covenants after user confirmation
+  const [extraRows, setExtraRows] = useState([]); // user-added covenants to calculate
+  const [calculating, setCalculating] = useState(false);
+  const [error, setError] = useState("");
+  const [step, setStep] = useState("upload"); // upload | confirm | done
+
+  async function handleExtract() {
+    if (!file) return;
+    setLoading(true); setError("");
+    try {
+      const fd = new FormData();
+      fd.append("pdf", file);
+      fd.append("issuerName", issuer.name);
+      fd.append("covenants", JSON.stringify(issuer.covenants));
+      const res = await fetch("/api/extract-pdf", { method:"POST", body:fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setResult(data);
+      setStep("confirm");
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  async function handleCalculateExtra() {
+    if (!file || extraRows.filter(r => r.name.trim()).length === 0) return;
+    setCalculating(true); setError("");
+    try {
+      const fd = new FormData();
+      fd.append("pdf", file);
+      fd.append("issuerName", issuer.name);
+      fd.append("covenants", JSON.stringify([]));
+      fd.append("calculateExtra", JSON.stringify(extraRows.filter(r => r.name.trim()).map(r => ({
+        name: r.name, tipo: r.tipo || "flujo", op: r.op || ">=", lim: parseNum(r.limite)
+      }))));
+      const res = await fetch("/api/extract-pdf", { method:"POST", body:fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      // Merge calculated extras into result
+      const calcMap = {};
+      (data.covenants || []).forEach(c => { calcMap[c.name] = c; });
+      setExtraRows(prev => prev.map(r => {
+        const calc = calcMap[r.name.trim()];
+        if (calc) return { ...r, actual: calc.actual, actualStr: calc.actualStr, holgura: calc.holgura, holguraStr: calc.holguraStr, encontrado: calc.encontrado, nota: calc.nota };
+        return r;
+      }));
+    } catch(e) { setError(e.message); }
+    finally { setCalculating(false); }
+  }
+
+  async function handleSave() {
+    setLoading(true);
+    try {
+      // Merge confirmed result covenants with any extras
+      const baseCovs = (result?.covenants || []).filter(c => c.actual !== null);
+      const extraCovs = extraRows.filter(r => r.name.trim()).map(r => ({
+        name: r.name.trim(),
+        tipo: r.tipo || "flujo",
+        op: r.op || ">=",
+        lim: parseNum(r.limite),
+        limite: r.limite || "",
+        actual: r.actualStr || null,
+        act: r.actual || null,
+        holgura: r.holgura || null,
+        actualStr: r.actualStr || null,
+        holguraStr: r.holguraStr || null
+      }));
+
+      // Update existing covenants with found values, add new ones from extras
+      const existingNames = issuer.covenants.map(c => c.name);
+      const updatedExisting = issuer.covenants.map(cov => {
+        const found = baseCovs.find(c => c.name === cov.name);
+        if (found) return { ...cov, actual: found.actualStr, act: found.actual, holgura: found.holguraStr };
+        return cov;
+      });
+      // Add extras that are truly new
+      const newExtras = extraCovs.filter(c => !existingNames.includes(c.name));
+      const allCovenants = [...updatedExisting, ...newExtras];
+
+      const res = await fetch("/api/issuers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issuerId: issuer.id, covenants: allCovenants, fechaEEFF: result?.fechaEEFF, replaceAll: true })
+      });
+      if (!res.ok) throw new Error("Error guardando");
+      onSuccess();
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  function addExtraRow() {
+    setExtraRows(prev => [...prev, { _id: Math.random(), name: "", tipo: "flujo", op: ">=", limite: "", actual: null, actualStr: null, holgura: null, holguraStr: null }]);
+  }
+  function removeExtra(id) { setExtraRows(prev => prev.filter(r => r._id !== id)); }
+  function updateExtra(id, field, val) { setExtraRows(prev => prev.map(r => r._id !== id ? r : { ...r, [field]: val })); }
+
+  const btn = (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit" });
+  const smallInp = (w) => ({ border:`1px solid ${L.border}`, borderRadius:4, padding:"4px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:w||"100%" });
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth: step==="confirm" ? 700 : 540, maxHeight:"90vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ padding:"20px 24px", borderBottom:`1px solid ${L.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div>
+            <div style={{ fontSize:15, fontWeight:600, color:AZ }}>{issuer.name}</div>
+            <div style={{ fontSize:12, color:L.sub }}>
+              {step==="upload" ? "Subir EEFF para extracción automática" : "Confirmar covenants encontrados"}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), padding:"6px 12px" }}>✕</button>
+        </div>
+
+        <div style={{ padding:24 }}>
+          {step === "upload" && (
+            <>
+              <div style={{ border:`2px dashed ${L.border}`, borderRadius:6, padding:32, textAlign:"center", marginBottom:16, background:file?"rgba(55,81,114,0.03)":"#fafafa" }}>
+                <div style={{ fontSize:28, marginBottom:8 }}>📄</div>
+                <p style={{ color:AZ, fontWeight:500, marginBottom:8 }}>{file ? file.name : "Sube el PDF del EEFF"}</p>
+                <p style={{ color:L.sub, fontSize:12, marginBottom:16 }}>Claude buscará los ratios en las notas de bonos/restricciones financieras (máx ~80 págs)</p>
+                <input type="file" accept=".pdf" onChange={e => setFile(e.target.files[0])} style={{ display:"none" }} id="pdf-input" />
+                <label htmlFor="pdf-input" style={{ ...btn("#f0f0f0",AZ), cursor:"pointer" }}>{file ? "Cambiar archivo" : "Seleccionar PDF"}</label>
+              </div>
+              {error && <p style={{ color:L.danger, fontSize:12, marginBottom:12, background:L.dangerBg, padding:"8px 12px", borderRadius:4 }}>⚠ {error}</p>}
+              <button onClick={handleExtract} disabled={!file||loading} style={{ ...btn(file&&!loading?AZ:"#ccc"), width:"100%" }}>
+                {loading ? "⏳ Analizando EEFF con Claude AI..." : "✨ Extraer covenants con IA"}
+              </button>
+            </>
+          )}
+
+          {step === "confirm" && result && (
+            <>
+              {/* Summary banner */}
+              <div style={{ background:"rgba(55,81,114,0.06)", border:`1px solid rgba(55,81,114,0.2)`, borderRadius:6, padding:"10px 14px", marginBottom:16, fontSize:12 }}>
+                <strong>Período detectado: {result.fechaEEFF}</strong>
+                {result.resumen && <div style={{ color:L.sub, marginTop:4 }}>{result.resumen}</div>}
+              </div>
+
               {/* Found covenants */}
               <p style={{ fontSize:11, fontWeight:600, color:AZ, marginBottom:8, textTransform:"uppercase", letterSpacing:0.5 }}>Covenants encontrados en el PDF</p>
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, marginBottom:16 }}>
