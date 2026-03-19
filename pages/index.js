@@ -224,21 +224,30 @@ function CreatableSelect({ value, onChange, options, placeholder = "Seleccionar.
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newVal, setNewVal] = useState("");
+  const [dropPos, setDropPos] = useState({ top:0, left:0, width:0 });
   const ref = useRef(null);
+  const triggerRef = useRef(null);
   useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setCreating(false); } };
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target) && triggerRef.current && !triggerRef.current.contains(e.target)) { setOpen(false); setCreating(false); } };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, []);
+  function handleOpen() {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setDropPos({ top: rect.bottom + 2, left: rect.left, width: rect.width });
+    }
+    setOpen(p => !p);
+  }
   const sinp = { border:`1px solid ${L.border}`, borderRadius:4, padding:"7px 10px", fontSize:12, fontFamily:"inherit", outline:"none", width:"100%" };
   return (
-    <div ref={ref} style={{ position:"relative", width }}>
-      <div onClick={() => setOpen(p => !p)} style={{ ...sinp, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", userSelect:"none" }}>
+    <div style={{ position:"relative", width }}>
+      <div ref={triggerRef} onClick={handleOpen} style={{ ...sinp, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", userSelect:"none" }}>
         <span style={{ color: value ? "#2d3142" : L.sub }}>{value || placeholder}</span>
         <span style={{ color:L.sub, fontSize:10 }}>▾</span>
       </div>
       {open && (
-        <div style={{ position:"absolute", top:"100%", left:0, right:0, zIndex:3000, background:"#fff", border:`1px solid ${L.border}`, borderRadius:5, boxShadow:"0 6px 20px rgba(0,0,0,0.12)", maxHeight:200, overflow:"auto" }}>
+        <div ref={ref} style={{ position:"fixed", top:dropPos.top, left:dropPos.left, width:Math.max(dropPos.width,200), zIndex:9999, background:"#fff", border:`1px solid ${L.border}`, borderRadius:5, boxShadow:"0 6px 20px rgba(0,0,0,0.15)", maxHeight:220, overflow:"auto" }}>
           {options.map(o => (
             <div key={o} onClick={() => { onChange(o); setOpen(false); }}
               style={{ padding:"8px 12px", cursor:"pointer", fontSize:12, color:o===value?AZ:"#2d3142", background:o===value?"rgba(55,81,114,0.06)":"#fff", fontWeight:o===value?600:400 }}
@@ -337,14 +346,14 @@ function CovRow({ r, isNew, onUpdate, onRemove, allUnits, setAllUnits }) {
   const unit = r.unidad || "x (veces)";
   return (
     <tr style={{ background: isNew ? "rgba(55,81,114,0.04)" : "transparent" }}>
-      <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}` }}><input style={sinp(160)} placeholder="ej: DFN/EBITDA" value={r.name} onChange={e => onUpdate(r._id, "name", e.target.value)} /></td>
+      <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}` }}><input style={sinp(160)} placeholder="ej: DFN/EBITDA" value={r.name} title={r._nota||""} onChange={e => onUpdate(r._id, "name", e.target.value)} /></td>
       <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(62)} value={r.tipo} onChange={e => onUpdate(r._id, "tipo", e.target.value)}><option value="flujo">flujo</option><option value="stock">stock</option></select></td>
-      <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(48)} value={r.op} onChange={e => onUpdate(r._id, "op", e.target.value)}><option value="<=">≤</option><option value=">=">≥</option></select></td>
+      <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(48)} value={r.op} onChange={e => onUpdate(r._id, "op", e.target.value)}><option value="<=">≤</option><option value=">=">≥</option><option value="<">&lt;</option><option value=">">&gt;</option></select></td>
       <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}` }}><input style={sinp(65)} placeholder="ej: 3,50" value={r.limite} onChange={e => { onUpdate(r._id, "limite", e.target.value); onUpdate(r._id, "lim", parseNum(e.target.value)); }} /></td>
       <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}`, minWidth:100 }}>
         <CreatableSelect value={unit} onChange={v => { onUpdate(r._id, "unidad", v); if (!allUnits.includes(v)) setAllUnits(p => [...p, v]); }} options={allUnits} placeholder="Unidad" width="95px" />
       </td>
-      <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}` }}><input style={{ ...sinp(75), borderColor: st==="breach"?L.danger:st==="warning"?L.warn:L.border }} placeholder="ej: 2,50" value={r.actualVal} onChange={e => onUpdate(r._id, "actualVal", e.target.value)} /></td>
+      <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}` }}><input style={{ ...sinp(75), borderColor: r._no_calculado&&!r.actualVal?"rgb(214,158,46)":st==="breach"?L.danger:st==="warning"?L.warn:L.border }} placeholder={r._no_calculado&&!r.actualVal?"⚠ no calculado":"ej: 2,50"} title={r._razon_no_calculado||r._nota||""} value={r.actualVal} onChange={e => onUpdate(r._id, "actualVal", e.target.value)} /></td>
       <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}`, whiteSpace:"nowrap" }}>{holgura !== null ? <span style={{ color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub, fontWeight:500, fontSize:11 }}>{fmtNum(holgura, unit)}</span> : <span style={{ color:"#ccc" }}>—</span>}</td>
       <td style={{ padding:"4px 5px", borderBottom:`1px solid ${L.border}` }}><button onClick={() => onRemove(r._id)} style={{ background:L.dangerBg, color:"rgb(170,40,50)", border:"none", borderRadius:4, padding:"3px 7px", cursor:"pointer", fontSize:10 }}>✕</button></td>
     </tr>
@@ -465,7 +474,7 @@ function NewIssuerModal({ onClose, onSuccess, allIssuers }) {
       const res = await fetch("/api/extract-pdf", { method:"POST", body:fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      const found = (data.covenants || []).map(c => ({ ...c, tipo:c.tipo||"flujo", op:c.op||">=", lim:c.lim||null, limite:c.limite||"", unidad:c.unidad||"x (veces)", actualVal:c.act!=null?String(c.act):"", _id:Math.random(), _needsInput:c.actual===null&&!c.no_calculado, _no_calculado:c.no_calculado||false, _razon_no_calculado:c.razon_no_calculado||null }));
+      const found = (data.covenants || []).map(c => ({ ...c, tipo:c.tipo||"flujo", op:c.op||">=", lim:c.lim||null, limite:c.limite||"", unidad:c.unidad||"x (veces)", actualVal:c.actual!=null?String(c.actual):(c.act!=null?String(c.act):""), _id:Math.random(), _needsInput:c.actual===null&&!c.no_calculado, _no_calculado:c.no_calculado||false, _razon_no_calculado:c.razon_no_calculado||null }));
       setDetected(found); setFechaEEFF(data.fechaEEFF || ""); setStep("review");
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
@@ -491,7 +500,7 @@ function NewIssuerModal({ onClose, onSuccess, allIssuers }) {
   const sinp = (w) => ({ border:`1px solid ${L.border}`, borderRadius:4, padding:"5px 7px", fontSize:11, fontFamily:"inherit", outline:"none", width:w||"100%" });
   const missingRequired = detected.filter(r => r.name.trim() && r._needsInput && !r._no_calculado && !parseNum(r.actualVal));
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
       <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:step==="review"?820:480, maxHeight:"90vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
         <div style={{ padding:"20px 24px", borderBottom:`1px solid ${L.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div style={{ fontSize:15, fontWeight:600, color:AZ }}>{step==="form"?"Nuevo emisor":step==="eeff"?"Cargar EEFF":`Covenants — ${name}`}</div>
@@ -568,7 +577,7 @@ function NewIssuerModal({ onClose, onSuccess, allIssuers }) {
 }
 
 function EditModal({ issuer, onClose, onSuccess }) {
-  const [rows, setRows] = useState(() => issuer.covenants.map(c => ({ ...c, actualVal:c.act!=null?String(c.act):"", unidad:c.unidad||"x (veces)", _id:Math.random() })));
+  const [rows, setRows] = useState(() => issuer.covenants.map(c => ({ ...c, actualVal:c.actual!=null?String(c.actual):(c.act!=null?String(c.act):""), unidad:c.unidad||"x (veces)", _id:Math.random() })));
   const [fechaEEFF, setFechaEEFF] = useState(issuer.fechaEEFF || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -696,8 +705,8 @@ function UploadModal({ issuer, onClose, onSuccess }) {
                 <div style={{ fontSize:22, marginBottom:6 }}>{mode==="smart"?"🧠":"📄"}</div>
                 <p style={{ color:AZ, fontWeight:500, marginBottom:6 }}>{file?file.name:mode==="smart"?"Sube el EEFF completo":"Sube el PDF del EEFF"}</p>
                 <p style={{ color:L.sub, fontSize:11, marginBottom:12 }}>{mode==="smart"?"Cualquier tamaño — se extraerán páginas relevantes automáticamente":"Balance + EERR + notas de bonos (máx 80 págs)"}</p>
-                <input type="file" accept=".pdf" onChange={e => setFile(e.target.files[0])} style={{ display:"none" }} id="pdf-input" />
-                <label htmlFor="pdf-input" style={{ ...btn("#f0f0f0",AZ), cursor:"pointer", fontSize:12 }}>{file?"Cambiar archivo":"Seleccionar PDF"}</label>
+                <input type="file" accept=".pdf" onChange={e => setFile(e.target.files[0])} style={{ display:"none" }} id={`pdf-input-${mode}`} />
+                <label htmlFor={`pdf-input-${mode}`} style={{ ...btn("#f0f0f0",AZ), cursor:"pointer", fontSize:12 }}>{file?"Cambiar archivo":"Seleccionar PDF"}</label>
               </div>
               {error && <p style={{ color:L.danger, fontSize:12, marginBottom:12, background:L.dangerBg, padding:"8px 12px", borderRadius:4 }}>⚠ {error}</p>}
               <button onClick={handleExtract} disabled={!file||loading} style={{ ...btn(file&&!loading?AZ:"#ccc"), width:"100%" }}>{loading?(mode==="smart"?"⏳ Extrayendo páginas relevantes...":"⏳ Analizando con Claude AI..."):(mode==="smart"?"🧠 Analizar PDF completo":"✨ Extraer covenants con IA")}</button>
@@ -738,10 +747,10 @@ function UploadModal({ issuer, onClose, onSuccess }) {
                         <tr key={r._id} style={{ background:r._isNew?"rgba(101,169,124,0.06)":!r._found?"rgba(255,200,0,0.05)":"transparent" }}>
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}`, fontWeight:500, fontSize:11 }}>{r.name}{r._isNew && <span style={{ marginLeft:4, fontSize:9, background:"rgba(101,169,124,0.2)", color:"rgb(40,120,70)", borderRadius:3, padding:"1px 4px" }}>NUEVO</span>}</td>
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(58)} value={r.tipo||"flujo"} onChange={e=>updateRow(r._id,"tipo",e.target.value)}><option value="flujo">flujo</option><option value="stock">stock</option></select></td>
-                          <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(44)} value={r.op||">="} onChange={e=>updateRow(r._id,"op",e.target.value)}><option value="<=">≤</option><option value=">=">≥</option></select></td>
+                          <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(44)} value={r.op||">="} onChange={e=>updateRow(r._id,"op",e.target.value)}><option value="<=">≤</option><option value=">=">≥</option><option value="<">&lt;</option><option value=">">&gt;</option></select></td>
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}` }}><input style={sinp(60)} placeholder="ej: 3,5" value={r.limite||""} onChange={e=>{updateRow(r._id,"limite",e.target.value);updateRow(r._id,"lim",parseNum(e.target.value));}}/></td>
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}`, minWidth:95 }}><CreatableSelect value={unit} onChange={v=>{updateRow(r._id,"unidad",v);if(!allUnits.includes(v))setAllUnits(p=>[...p,v]);}} options={allUnits} placeholder="Unidad" width="90px"/></td>
-                          <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}` }}><input style={{ ...sinp(70), borderColor:!r._found&&!parseNum(r.actualVal)?"rgb(214,158,46)":st==="breach"?L.danger:st==="warning"?L.warn:L.border }} placeholder={!r._found?"manual":"valor"} value={r.actualVal} onChange={e=>updateRow(r._id,"actualVal",e.target.value)}/></td>
+                          <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}` }}><input style={{ ...sinp(70), borderColor:!r._found&&!parseNum(r.actualVal)?"rgb(214,158,46)":st==="breach"?L.danger:st==="warning"?L.warn:L.border }} placeholder={r._no_calculado?"⚠ "+( r._razon_no_calculado||"no calculado").substring(0,25):!r._found?"ingresar manual":"valor"} value={r.actualVal} onChange={e=>updateRow(r._id,"actualVal",e.target.value)}/></td>
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}`, whiteSpace:"nowrap" }}>{holgura!==null?<span style={{ color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub, fontWeight:500, fontSize:11 }}>{fmtNum(holgura,unit)}</span>:<span style={{ color:"#ccc" }}>—</span>}</td>
                           <td style={{ padding:"4px 7px", borderBottom:`1px solid ${L.border}`, fontSize:10, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                             {r._no_calculado
@@ -768,7 +777,7 @@ function UploadModal({ issuer, onClose, onSuccess }) {
                     <div style={{ overflowX:"auto" }}>
                       <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, marginBottom:8, minWidth:620 }}>
                         <thead><tr>{["Nombre","Tipo","Op.","Límite","Unidad","Calculado",""].map(h=><th key={h} style={{ textAlign:"left", padding:"5px 8px", background:"#f5f6fa", color:AZ, fontSize:10, fontWeight:600 }}>{h}</th>)}</tr></thead>
-                        <tbody>{extraRows.map(r => (<tr key={r._id}><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><input style={sinp(140)} placeholder="ej: DFN/EBITDA" value={r.name} onChange={e=>updateExtra(r._id,"name",e.target.value)}/></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(58)} value={r.tipo} onChange={e=>updateExtra(r._id,"tipo",e.target.value)}><option value="flujo">flujo</option><option value="stock">stock</option></select></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(44)} value={r.op} onChange={e=>updateExtra(r._id,"op",e.target.value)}><option value="<=">≤</option><option value=">=">≥</option></select></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><input style={sinp(60)} placeholder="ej: 3,50" value={r.limite} onChange={e=>updateExtra(r._id,"limite",e.target.value)}/></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}`, minWidth:90 }}><CreatableSelect value={r.unidad||"x (veces)"} onChange={v=>{updateExtra(r._id,"unidad",v);if(!allUnits.includes(v))setAllUnits(p=>[...p,v]);}} options={allUnits} placeholder="Unidad" width="85px"/></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}`, fontWeight:500, color:r.actual!=null?L.sub:"#ccc" }}>{r.actualStr||<span style={{ fontSize:10, color:"#ccc" }}>pendiente</span>}</td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><button onClick={()=>removeExtra(r._id)} style={{ background:L.dangerBg, color:"rgb(170,40,50)", border:"none", borderRadius:4, padding:"3px 7px", cursor:"pointer", fontSize:10 }}>✕</button></td></tr>))}</tbody>
+                        <tbody>{extraRows.map(r => (<tr key={r._id}><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><input style={sinp(140)} placeholder="ej: DFN/EBITDA" value={r.name} onChange={e=>updateExtra(r._id,"name",e.target.value)}/></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(58)} value={r.tipo} onChange={e=>updateExtra(r._id,"tipo",e.target.value)}><option value="flujo">flujo</option><option value="stock">stock</option></select></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><select style={sinp(44)} value={r.op} onChange={e=>updateExtra(r._id,"op",e.target.value)}><option value="<=">≤</option><option value=">=">≥</option><option value="<">&lt;</option><option value=">">&gt;</option></select></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><input style={sinp(60)} placeholder="ej: 3,50" value={r.limite} onChange={e=>updateExtra(r._id,"limite",e.target.value)}/></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}`, minWidth:90 }}><CreatableSelect value={r.unidad||"x (veces)"} onChange={v=>{updateExtra(r._id,"unidad",v);if(!allUnits.includes(v))setAllUnits(p=>[...p,v]);}} options={allUnits} placeholder="Unidad" width="85px"/></td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}`, fontWeight:500, color:r.actual!=null?L.sub:"#ccc" }}>{r.actualStr||<span style={{ fontSize:10, color:"#ccc" }}>pendiente</span>}</td><td style={{ padding:"4px 6px", borderBottom:`1px solid ${L.border}` }}><button onClick={()=>removeExtra(r._id)} style={{ background:L.dangerBg, color:"rgb(170,40,50)", border:"none", borderRadius:4, padding:"3px 7px", cursor:"pointer", fontSize:10 }}>✕</button></td></tr>))}</tbody>
                       </table>
                     </div>
                     <button onClick={handleCalculateExtra} disabled={calculating||!file} style={{ background:"rgba(55,81,114,0.1)", color:AZ, border:"none", borderRadius:4, padding:"6px 14px", cursor:"pointer", fontSize:12, fontWeight:500, marginBottom:8 }}>{calculating?"⏳ Calculando...":"⚡ Calcular desde el PDF"}</button>
