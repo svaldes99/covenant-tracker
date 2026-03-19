@@ -248,31 +248,32 @@ function UploadModal({ issuer, onClose, onSuccess }) {
   async function handleSave() {
     setLoading(true);
     try {
-      // Merge confirmed result covenants with any extras
-      const baseCovs = (result?.covenants || []).filter(c => c.actual !== null);
       const extraCovs = extraRows.filter(r => r.name.trim()).map(r => ({
-        name: r.name.trim(),
-        tipo: r.tipo || "flujo",
-        op: r.op || ">=",
-        lim: parseNum(r.limite),
-        limite: r.limite || "",
-        actual: r.actualStr || null,
-        act: r.actual || null,
-        holgura: r.holgura || null,
-        actualStr: r.actualStr || null,
-        holguraStr: r.holguraStr || null
+        name: r.name.trim(), tipo: r.tipo || "flujo", op: r.op || ">=",
+        lim: parseNum(r.limite), limite: r.limite || "",
+        actual: r.actualStr || null, act: r.actual || null,
+        holgura: r.holgura || null, actualStr: r.actualStr || null, holguraStr: r.holguraStr || null
       }));
 
-      // Update existing covenants with found values, add new ones from extras
-      const existingNames = issuer.covenants.map(c => c.name);
-      const updatedExisting = issuer.covenants.map(cov => {
-        const found = baseCovs.find(c => c.name === cov.name);
-        if (found) return { ...cov, actual: found.actualStr, act: found.actual, holgura: found.holguraStr };
-        return cov;
-      });
-      // Add extras that are truly new
-      const newExtras = extraCovs.filter(c => !existingNames.includes(c.name));
-      const allCovenants = [...updatedExisting, ...newExtras];
+      let allCovenants;
+
+      if (issuer._overrideCovenants) {
+        // User accepted the new covenant names found by Claude
+        const existingOverrideNames = issuer._overrideCovenants.map(c => c.name);
+        const newExtras = extraCovs.filter(c => !existingOverrideNames.includes(c.name));
+        allCovenants = [...issuer._overrideCovenants, ...newExtras];
+      } else {
+        // Keep existing covenant names, update values
+        const baseCovs = (result?.covenants || []).filter(c => c.actual !== null);
+        const existingNames = issuer.covenants.map(c => c.name);
+        const updatedExisting = issuer.covenants.map(cov => {
+          const found = baseCovs.find(c => c.name === cov.name);
+          if (found) return { ...cov, actual: found.actualStr, act: found.actual, holgura: found.holguraStr };
+          return cov;
+        });
+        const newExtras = extraCovs.filter(c => !existingNames.includes(c.name));
+        allCovenants = [...updatedExisting, ...newExtras];
+      }
 
       const res = await fetch("/api/issuers", {
         method: "POST",
@@ -280,6 +281,7 @@ function UploadModal({ issuer, onClose, onSuccess }) {
         body: JSON.stringify({ issuerId: issuer.id, covenants: allCovenants, fechaEEFF: result?.fechaEEFF, replaceAll: true })
       });
       if (!res.ok) throw new Error("Error guardando");
+      issuer._overrideCovenants = null;
       onSuccess();
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
