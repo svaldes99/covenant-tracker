@@ -31,10 +31,8 @@ export default async function handler(req, res) {
     data = data.map(iss => {
       if (iss.id !== issuerId) return iss;
       if (replaceAll) {
-        // Replace entire covenant list (add/remove support)
         return { ...iss, covenants, fechaEEFF: fechaEEFF || iss.fechaEEFF };
       }
-      // Default: update values of existing covenants by name
       const updatedCovenants = iss.covenants.map(cov => {
         const extracted = covenants.find(e => e.name === cov.name);
         if (!extracted || extracted.actual === null) return cov;
@@ -46,8 +44,29 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  // PATCH: update issuer metadata (name, sector, clasificacion)
+  if (req.method === "PATCH") {
+    const { issuerId, name, sector, clasificacion } = req.body;
+    let data = await db.get("issuers") || INITIAL_ISSUERS;
+    data = data.map(iss => {
+      if (iss.id !== issuerId) return iss;
+      return { ...iss, name: name || iss.name, sector: sector || iss.sector, clasificacion: clasificacion || iss.clasificacion };
+    });
+    await db.set("issuers", data);
+    return res.status(200).json({ ok: true });
+  }
+
   if (req.method === "PUT") {
     await db.set("issuers", req.body);
+    return res.status(200).json({ ok: true });
+  }
+
+  // DELETE: remove issuer by id
+  if (req.method === "DELETE") {
+    const { issuerId } = req.body;
+    let data = await db.get("issuers") || INITIAL_ISSUERS;
+    data = data.filter(iss => iss.id !== issuerId);
+    await db.set("issuers", data);
     return res.status(200).json({ ok: true });
   }
 

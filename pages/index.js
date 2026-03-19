@@ -403,6 +403,111 @@ function NewIssuerModal({ onClose, onSuccess, allIssuers }) {
   );
 }
 
+
+function EditIssuerModal({ issuer, onClose, onSuccess, allIssuers }) {
+  const [name, setName] = useState(issuer.name || "");
+  const [sector, setSector] = useState(issuer.sector || "");
+  const [clasificacion, setClasificacion] = useState(issuer.clasificacion || "");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const existingSectors = useMemo(() => {
+    const s = new Set(DEFAULT_SECTORS);
+    (allIssuers || []).forEach(i => { if (i.sector && i.sector !== "Sin sector") s.add(i.sector); });
+    return [...s].sort();
+  }, [allIssuers]);
+
+  async function handleSave() {
+    if (!name.trim()) { setError("El nombre es obligatorio"); return; }
+    setLoading(true); setError("");
+    try {
+      const res = await fetch("/api/issuers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issuerId: issuer.id, name: name.trim(), sector: sector || issuer.sector, clasificacion: clasificacion || issuer.clasificacion })
+      });
+      if (!res.ok) throw new Error("Error guardando");
+      onSuccess();
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  const btn = (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit" });
+  const inp = { border:`1px solid ${L.border}`, borderRadius:4, padding:"8px 10px", fontSize:13, fontFamily:"inherit", outline:"none", width:"100%" };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:440, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ padding:"20px 24px", borderBottom:`1px solid ${L.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontSize:15, fontWeight:600, color:AZ }}>Editar emisor</div>
+          <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), padding:"6px 12px" }}>✕</button>
+        </div>
+        <div style={{ padding:24, display:"flex", flexDirection:"column", gap:14 }}>
+          <div>
+            <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:5, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Nombre *</label>
+            <input style={inp} value={name} onChange={e => setName(e.target.value)} autoFocus />
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:5, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Sector / Industria</label>
+            <CreatableSelect value={sector||undefined} onChange={v => setSector(v)} options={existingSectors} placeholder="Seleccionar o crear sector..." />
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:L.sub, display:"block", marginBottom:5, fontWeight:600, textTransform:"uppercase", letterSpacing:0.5 }}>Clasificación</label>
+            <input style={inp} placeholder="ej: AA, AA-, A+" value={clasificacion} onChange={e => setClasificacion(e.target.value)} />
+          </div>
+          {error && <p style={{ color:L.danger, fontSize:12, background:L.dangerBg, padding:"8px 12px", borderRadius:4, margin:0 }}>⚠ {error}</p>}
+          <div style={{ display:"flex", gap:8, marginTop:4 }}>
+            <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), flex:1 }}>Cancelar</button>
+            <button onClick={handleSave} disabled={loading} style={{ ...btn(), flex:2 }}>{loading ? "Guardando..." : "✓ Guardar cambios"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteIssuerModal({ issuer, onClose, onSuccess }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleDelete() {
+    setLoading(true); setError("");
+    try {
+      const res = await fetch("/api/issuers", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issuerId: issuer.id })
+      });
+      if (!res.ok) throw new Error("Error eliminando");
+      onSuccess();
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  const btn = (bg=AZ, col="#fff") => ({ background:bg, color:col, border:"none", borderRadius:4, padding:"9px 18px", cursor:"pointer", fontSize:13, fontWeight:500, fontFamily:"inherit" });
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background:"#fff", borderRadius:8, width:"100%", maxWidth:400, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ padding:"20px 24px", borderBottom:`1px solid ${L.border}` }}>
+          <div style={{ fontSize:15, fontWeight:600, color:L.danger }}>Eliminar emisor</div>
+        </div>
+        <div style={{ padding:24 }}>
+          <p style={{ fontSize:13, color:"#2d3142", marginBottom:8 }}>¿Estás seguro que quieres eliminar <strong>{issuer.name}</strong>?</p>
+          <p style={{ fontSize:12, color:L.sub, marginBottom:20 }}>Esta acción eliminará el emisor y todos sus covenants. No se puede deshacer.</p>
+          {error && <p style={{ color:L.danger, fontSize:12, background:L.dangerBg, padding:"8px 12px", borderRadius:4, marginBottom:12 }}>⚠ {error}</p>}
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={onClose} style={{ ...btn("#f0f0f0","#666"), flex:1 }}>Cancelar</button>
+            <button onClick={handleDelete} disabled={loading} style={{ ...btn(L.danger), flex:2 }}>{loading ? "Eliminando..." : "🗑 Eliminar"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EditModal({ issuer, onClose, onSuccess }) {
   const [rows, setRows] = useState(() => issuer.covenants.map(c => ({ ...c, actualVal:c.act!=null?String(c.act):"", unidad:c.unidad||"x (veces)", _id:Math.random() })));
   const [fechaEEFF, setFechaEEFF] = useState(issuer.fechaEEFF || "");
@@ -704,6 +809,8 @@ export default function App() {
   const [selId, setSelId] = useState(null);
   const [uploadIssuer, setUploadIssuer] = useState(null);
   const [editIssuer, setEditIssuer] = useState(null);
+  const [editIssuerMeta, setEditIssuerMeta] = useState(null);
+  const [deleteIssuer, setDeleteIssuer] = useState(null);
   const [newIssuerOpen, setNewIssuerOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -764,11 +871,11 @@ export default function App() {
     <Header title="Emisores" sub="Haz clic en un emisor para ver detalles" action={<button style={s.btn()} onClick={() => setNewIssuerOpen(true)}>＋ Nuevo emisor</button>} />
     <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}><input style={{ ...s.inp, width:200 }} placeholder="Buscar emisor..." value={search} onChange={e=>setSearch(e.target.value)}/><select style={s.sel} value={filterSector} onChange={e=>setFilterSector(e.target.value)}><option value="all">Todos los sectores</option>{sectors.filter(x=>x!=="all").map(x=><option key={x} value={x}>{x}</option>)}</select><select style={s.sel} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}><option value="all">Todos los estados</option><option value="ok">✓ Cumple</option><option value="warning">⚠ En riesgo</option><option value="breach">✗ Incumple</option></select></div>
     <div style={s.card}><table style={s.tbl}><thead><tr>{["","Emisor","Sector","Clasificación","EEFF","Cvts","Estado","Acciones"].map(h=><th key={h} style={s.th}>{h}</th>)}</tr></thead>
-    <tbody>{filteredIssuers.map((iss,i)=>{const st=issuerStatus(iss);const bk={breach:iss.covenants.filter(c=>getStatus(c)==="breach").length,warning:iss.covenants.filter(c=>getStatus(c)==="warning").length,ok:iss.covenants.filter(c=>getStatus(c)==="ok").length};return(<tr key={iss.id} style={{ background:i%2===0?"#fff":"#fafafa", cursor:"pointer" }} onClick={()=>setSelId(iss.id)}><td style={{ ...s.td, width:14 }}><Dot status={st}/></td><td style={{ ...s.td, fontWeight:600, color:AZ }}>{iss.name}</td><td style={{ ...s.td, color:L.sub }}>{iss.sector}</td><td style={{ ...s.td, fontWeight:600, color:AZ }}>{iss.clasificacion}</td><td style={{ ...s.td, color:isStale(iss.fechaEEFF)?L.warn:L.sub }}>{iss.fechaEEFF}{isStale(iss.fechaEEFF)?" ⚠":""}</td><td style={s.td}>{iss.covenants.length}</td><td style={s.td}><div style={{ display:"flex", gap:4 }}>{bk.breach>0&&<span style={{ background:L.dangerBg,color:"rgb(170,40,50)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500 }}>✗ {bk.breach}</span>}{bk.warning>0&&<span style={{ background:L.warnBg,color:"rgb(150,110,20)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500 }}>⚠ {bk.warning}</span>}{bk.ok>0&&<span style={{ background:L.okBg,color:"rgb(40,120,70)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500 }}>✓ {bk.ok}</span>}</div></td><td style={s.td} onClick={e=>e.stopPropagation()}><div style={{ display:"flex", gap:4 }}><button style={{ ...s.btn("#f0f2f5",AZ), fontSize:11 }} onClick={()=>setUploadIssuer(iss)}>📄 PDF</button><button style={{ ...s.btn("rgba(55,81,114,0.1)",AZ), fontSize:11 }} onClick={()=>setEditIssuer(iss)}>✏ Manual</button></div></td></tr>);})}</tbody></table></div></div>);
+    <tbody>{filteredIssuers.map((iss,i)=>{const st=issuerStatus(iss);const bk={breach:iss.covenants.filter(c=>getStatus(c)==="breach").length,warning:iss.covenants.filter(c=>getStatus(c)==="warning").length,ok:iss.covenants.filter(c=>getStatus(c)==="ok").length};return(<tr key={iss.id} style={{ background:i%2===0?"#fff":"#fafafa", cursor:"pointer" }} onClick={()=>setSelId(iss.id)}><td style={{ ...s.td, width:14 }}><Dot status={st}/></td><td style={{ ...s.td, fontWeight:600, color:AZ }}>{iss.name}</td><td style={{ ...s.td, color:L.sub }}>{iss.sector}</td><td style={{ ...s.td, fontWeight:600, color:AZ }}>{iss.clasificacion}</td><td style={{ ...s.td, color:isStale(iss.fechaEEFF)?L.warn:L.sub }}>{iss.fechaEEFF}{isStale(iss.fechaEEFF)?" ⚠":""}</td><td style={s.td}>{iss.covenants.length}</td><td style={s.td}><div style={{ display:"flex", gap:4 }}>{bk.breach>0&&<span style={{ background:L.dangerBg,color:"rgb(170,40,50)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500 }}>✗ {bk.breach}</span>}{bk.warning>0&&<span style={{ background:L.warnBg,color:"rgb(150,110,20)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500 }}>⚠ {bk.warning}</span>}{bk.ok>0&&<span style={{ background:L.okBg,color:"rgb(40,120,70)",borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:500 }}>✓ {bk.ok}</span>}</div></td><td style={s.td} onClick={e=>e.stopPropagation()}><div style={{ display:"flex", gap:4, flexWrap:"wrap" }}><button style={{ ...s.btn("#f0f2f5",AZ), fontSize:11 }} onClick={()=>setUploadIssuer(iss)}>📄 PDF</button><button style={{ ...s.btn("rgba(55,81,114,0.1)",AZ), fontSize:11 }} onClick={()=>setEditIssuer(iss)}>✏ Cvts</button><button style={{ ...s.btn("rgba(55,81,114,0.08)",AZ), fontSize:11 }} onClick={()=>setEditIssuerMeta(iss)}>⚙ Datos</button><button style={{ background:L.dangerBg, color:"rgb(170,40,50)", border:"none", borderRadius:4, padding:"5px 8px", cursor:"pointer", fontSize:11, fontFamily:"inherit", fontWeight:500 }} onClick={()=>setDeleteIssuer(iss)}>🗑</button></div></td></tr>);})}</tbody></table></div></div>);
 
   const Detalle = () => {
     if (!sel) return null;
-    return (<div><div style={{ display:"flex", gap:8, marginBottom:16 }}><button style={s.btn("#f0f2f5","#666")} onClick={()=>setSelId(null)}>← Volver</button><button style={s.btn()} onClick={()=>setUploadIssuer(sel)}>📄 Subir EEFF</button><button style={{ ...s.btn("rgba(55,81,114,0.1)",AZ) }} onClick={()=>setEditIssuer(sel)}>✏ Editar manual</button></div>
+    return (<div><div style={{ display:"flex", gap:8, marginBottom:16 }}><button style={s.btn("#f0f2f5","#666")} onClick={()=>setSelId(null)}>← Volver</button><button style={s.btn()} onClick={()=>setUploadIssuer(sel)}>📄 Subir EEFF</button><button style={{ ...s.btn("rgba(55,81,114,0.1)",AZ) }} onClick={()=>setEditIssuer(sel)}>✏ Editar cvts</button><button style={{ ...s.btn("rgba(55,81,114,0.08)",AZ) }} onClick={()=>setEditIssuerMeta(sel)}>⚙ Editar datos</button></div>
       <Header title={sel.name} sub={`${sel.sector} · ${sel.clasificacion} · EEFF ${sel.fechaEEFF}${isStale(sel.fechaEEFF)?" ⚠ desactualizado":""}`}/>
       {["flujo","stock"].map(tipo=>{const covs=sel.covenants.filter(c=>c.tipo===tipo);if(!covs.length)return null;return(<div key={tipo} style={{ ...s.card, marginBottom:16 }}><p style={{ fontSize:11, fontWeight:600, color:AZ, marginBottom:14, textTransform:"uppercase", letterSpacing:0.5 }}>Covenants de {tipo==="flujo"?"flujo":"balance"}</p><table style={s.tbl}><thead><tr>{["Covenant","Límite","Unidad","Actual","Holgura","Estado"].map(h=><th key={h} style={s.th}>{h}</th>)}</tr></thead><tbody>{covs.map((c,i)=>{const st=getStatus(c);const bg=st==="breach"?"rgba(210,70,80,0.05)":st==="warning"?"rgba(214,158,46,0.05)":i%2===0?"#fff":"#fafafa";return(<tr key={i} style={{ background:bg }}><td style={{ ...s.td, fontWeight:500 }}>{c.name}</td><td style={{ ...s.td, color:L.sub }}>{c.limite}</td><td style={{ ...s.td, color:L.sub, fontSize:11 }}>{c.unidad||"x"}</td><td style={{ ...s.td, fontWeight:600, color:st==="breach"?L.danger:st==="warning"?L.warn:"#2d3142", fontSize:13 }}>{c.actual}</td><td style={{ ...s.td, color:st==="breach"?L.danger:st==="warning"?L.warn:L.sub }}>{c.holgura}</td><td style={s.td}><div style={{ display:"flex", alignItems:"center", gap:6 }}><Dot status={st}/><Pill status={st}/></div></td></tr>);})}</tbody></table></div>);})}</div>);
   };
@@ -788,5 +895,7 @@ export default function App() {
     {uploadIssuer && <UploadModal issuer={uploadIssuer} onClose={()=>setUploadIssuer(null)} onSuccess={()=>{setUploadIssuer(null);loadData();}}/>}
     {editIssuer && <EditModal issuer={editIssuer} onClose={()=>setEditIssuer(null)} onSuccess={()=>{setEditIssuer(null);loadData();}}/>}
     {newIssuerOpen && <NewIssuerModal onClose={()=>setNewIssuerOpen(false)} onSuccess={()=>{setNewIssuerOpen(false);loadData();}} allIssuers={issuers}/>}
+    {editIssuerMeta && <EditIssuerModal issuer={editIssuerMeta} onClose={()=>setEditIssuerMeta(null)} onSuccess={()=>{setEditIssuerMeta(null);loadData();}} allIssuers={issuers}/>}
+    {deleteIssuer && <DeleteIssuerModal issuer={deleteIssuer} onClose={()=>setDeleteIssuer(null)} onSuccess={()=>{setDeleteIssuer(null);setSelId(null);loadData();}}/>}
   </>);
 }
